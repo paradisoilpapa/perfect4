@@ -307,7 +307,14 @@ if st.button("スコア計算実行"):
             continue
         num = i + 1
         base = base_score[kakushitsu[i]]
-        wind = wind_straight_combo_adjust(kakushitsu[i], wind_direction, wind_speed, straight_length, line_order[i])
+        wind = wind_straight_combo_adjust(
+    kakushitsu[i],
+    st.session_state.selected_wind,
+    wind_speed,
+    straight_length,
+    line_order[i]
+)
+
         kasai = score_from_chakujun(chaku[i])
         rating_score = tenscore_score[i]
         rain_corr = rain_adjust(kakushitsu[i])
