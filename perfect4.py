@@ -224,6 +224,10 @@ line_def = {
     'D': extract_car_list(d_line),
 }
 
+# --- スコア計算処理 ---
+st.subheader("▼ スコア計算")
+if st.button("スコア計算実行"):
+
 # --- グループ補正計算用関数（A〜D対応） ---
 def compute_group_bonus(score_parts, line_def):
     group_scores = {k: 0.0 for k in ['A', 'B', 'C', 'D']}
