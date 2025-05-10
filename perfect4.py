@@ -288,22 +288,23 @@ if st.button("スコア計算実行"):
         'A': extract_car_list(a_line),
         'B': extract_car_list(b_line),
         'C': extract_car_list(c_line),
+        'D': extract_car_list(d_line),
     }
     line_order_map = build_line_position_map()
-    line_order = [line_order_map.get(i + 1, 0) for i in range(7)]
+    line_order = [line_order_map.get(i + 1, 0) for i in range(9)]
 
     # スコア計算
     tenscore_score = score_from_tenscore_list(rating)
     score_parts = []
-    for i in range(7):
+    for i in range(9):
         if not tairetsu[i].isdigit():
             continue
         num = i + 1
         base = base_score[kakushitsu[i]]
-        wind = wind_straight_combo_adjust(kakushitsu[i], st.session_state.selected_wind, wind_speed, straight_length, line_order[i])
+        wind = wind_straight_combo_adjust(kakushitsu[i], wind_direction, wind_speed, straight_length, line_order[i])
         kasai = score_from_chakujun(chaku[i])
         rating_score = tenscore_score[i]
-        rain_corr = rain_adjust(kakushitsu[i])
+        rain_corr = rain_adjust(kakushitsu[i]) if rain else 0.0
         symbol_score = symbol_bonus.get(car_to_symbol.get(num, '無'), 0.0)
         line_bonus = line_member_bonus(line_order[i])
         bank_bonus = bank_character_bonus(kakushitsu[i], bank_angle, straight_length)
