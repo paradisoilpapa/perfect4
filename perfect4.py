@@ -145,10 +145,13 @@ bank_length = st.number_input("バンク周長(m)", min_value=300.0, max_value=5
 # ▼ 雨チェック（最後に）
 rain = st.checkbox("雨（滑走・慎重傾向あり）")
 
-# --- 【選手データ入力】 ---
-st.header("【選手データ入力】")
-
-symbol_input_options = ['◎', '〇', '▲', '△', '×', '無']
+# --- ライン構成入力（A〜Dライン＋単騎） ---
+st.subheader("▼ ライン構成入力（A〜Dライン＋単騎）")
+a_line = st.text_input("Aライン（例：137）", key="a_line", max_chars=9)
+b_line = st.text_input("Bライン（例：25）", key="b_line", max_chars=9)
+c_line = st.text_input("Cライン（例：4）", key="c_line", max_chars=9)
+d_line = st.text_input("Dライン（例：6）", key="d_line", max_chars=9)
+solo_line = st.text_input("単騎枠（例：9）", key="solo_line", max_chars=9)
 
 # ▼ 選手データ入力フィールド（9車分）
 kakushitsu_keys = ['逃', '両', '追']
