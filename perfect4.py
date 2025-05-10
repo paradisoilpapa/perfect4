@@ -195,12 +195,14 @@ for sym, input_str in symbol_inputs.items():
         if c.isdigit():
             car_to_symbol[int(c)] = sym
 
-# --- ライン構成入力欄（A〜Cライン＋単騎） ---
-st.subheader("▼ ライン構成入力（A〜Cライン＋単騎）")
-a_line = st.text_input("Aライン（例：137）", max_chars=7)
-b_line = st.text_input("Bライン（例：25）", max_chars=7)
-c_line = st.text_input("Cライン（例：4）", max_chars=7)
-solo_line = st.text_input("単騎枠（例：6）", max_chars=7)
+# --- ライン構成入力（A〜Dライン＋単騎） ---
+st.subheader("▼ ライン構成入力（A〜Dライン＋単騎）")
+a_line = st.text_input("Aライン（例：137）", key="a_line", max_chars=9)
+b_line = st.text_input("Bライン（例：25）", key="b_line", max_chars=9)
+c_line = st.text_input("Cライン（例：4）", key="c_line", max_chars=9)
+d_line = st.text_input("Dライン（例：6）", key="d_line", max_chars=9)
+solo_line = st.text_input("単騎枠（例：9）", key="solo_line", max_chars=9)
+
 
 # --- ライン構成入力に必要な補助関数 ---
 def extract_car_list(input_str):
