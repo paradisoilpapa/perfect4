@@ -158,6 +158,8 @@ c_line = st.text_input("Cライン（例：4）", max_chars=9)
 d_line = st.text_input("Dライン（例：6）", max_chars=9)
 solo_line = st.text_input("単騎枠（例：9）", max_chars=9)
 
+
+
 # --- 雨チェック（最後に） ---
 rain = st.checkbox("雨（滑走・慎重傾向あり）")
 
