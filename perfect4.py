@@ -150,38 +150,33 @@ st.header("【選手データ入力】")
 
 symbol_input_options = ['◎', '〇', '▲', '△', '×', '無']
 
-st.subheader("▼ 脚質入力（逃・両・追：車番を半角数字で入力）")
-
+# ▼ 選手データ入力フィールド（9車分）
 kakushitsu_keys = ['逃', '両', '追']
 kakushitsu_inputs = {}
 cols = st.columns(3)
 for i, k in enumerate(kakushitsu_keys):
     with cols[i]:
         st.markdown(f"**{k}**")
-        kakushitsu_inputs[k] = st.text_input("", key=f"kaku_{k}", max_chars=14)
+        kakushitsu_inputs[k] = st.text_input("", key=f"kaku_{k}", max_chars=18)
 
-# 車番 → 脚質の辞書を構築
 car_to_kakushitsu = {}
 for k, val in kakushitsu_inputs.items():
     for c in val:
         if c.isdigit():
             n = int(c)
-            if 1 <= n <= 7:
+            if 1 <= n <= 9:
                 car_to_kakushitsu[n] = k
 
-# kakushitsu[0] = 1番選手の脚質、など
-kakushitsu = [car_to_kakushitsu.get(i + 1, '追') for i in range(7)]  # 未指定は「追」で補完
+kakushitsu = [car_to_kakushitsu.get(i + 1, '追') for i in range(9)]
 
-st.subheader("▼ 前走着順入力（1〜7着）")
-chaku = [st.number_input(f"{i+1}番着順", min_value=1, max_value=7, value=5, step=1, key=f"chaku_{i}") for i in range(7)]
-
+st.subheader("▼ 前走着順入力（1〜9着）")
+chaku = [st.number_input(f"{i+1}番着順", min_value=1, max_value=9, value=5, step=1, key=f"chaku_{i}") for i in range(9)]
 
 st.subheader("▼ 競争得点入力")
-rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(7)]
+rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(9)]
 
 st.subheader("▼ 予想隊列入力（数字、欠の場合は空欄）")
-tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(7)]
-
+tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(9)]
 
 
 st.subheader("▼ 政春印入力（各記号ごとに該当車番を入力）")
