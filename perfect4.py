@@ -153,7 +153,7 @@ cols = st.columns(3)
 for i, k in enumerate(kakushitsu_keys):
     with cols[i]:
         st.markdown(f"**{k}**")
-        kakushitsu_inputs[k] = st.text_input("", key=f"kaku_{k}", max_chars=18)
+        kakushitsu_inputs[k] = st.text_input("", key=f"kaku_{k}", max_chars=14)
 
 car_to_kakushitsu = {}
 for k, val in kakushitsu_inputs.items():
@@ -237,16 +237,16 @@ if st.button("スコア計算実行"):
         return result
 
     def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
-        coeff_table = {"左上": +0.7, "上": +1.0, "右上": +0.7, "左": 0.0, "右": 0.0,
-                       "左下": -0.7, "下": -1.0, "右下": -0.7, "無風": 0.0}
-        pos_weight = {0: 0.0, 1: 1.0, 2: 0.8, 3: 0.5, 4: 0.3}
         if direction == "無風" or speed < 0.5:
             return 0
-        base = coeff_table.get(direction, 0.0) * speed * pos_weight.get(pos, 0.0)
-        return round(base * {'逃': 1.2, '両': 1.0, '追': 0.8}.get(kaku, 1.0), 2)
+        basic = wind_coefficients.get(direction, 0.0) * speed * position_multipliers.get(pos, 0.0)
+        coeff = {'逃': 1.2, '両': 1.0, '追': 0.8}.get(kaku, 1.0)
+        return round(basic * coeff, 2)
 
     def score_from_chakujun(pos):
-        return {1: -0.5, 2: -0.3, 3: -0.2, 4: 0.0, 5: 0.3, 6: 0.2, 7: 0.0, 8: -0.1, 9: -0.2}.get(pos, 0.0)
+        correction_map ={1: -0.5, 2: -0.3, 3: -0.2, 4: 0.0, 5: 0.3, 6: 0.2, 7: 0.0, 8: 0.0, 9: 0.0}
+        return correction_map.get(pos, 0.0)
+
 
     def rain_adjust(kaku):
         return {'逃': 1.5, '両': 0.5, '追': -1.5}.get(kaku, 0.0) if rain else 0.0
@@ -255,10 +255,10 @@ if st.button("スコア計算実行"):
         return {0: 0.7, 1: 1.0, 2: 0.8, 3: 0.5, 4: 0.3}.get(pos, 0.0)
 
     def bank_character_bonus(kaku, angle, straight):
-        s = (straight - 50.0) / 10.0
-        a = (angle - 30.0) / 5.0
-        f = -0.8 * s + 0.6 * a
-        return round({'逃': +f, '追': -f, '両': 0.0}.get(kaku, 0.0), 2)
+        straight_factor = (straight - 50.0) / 10.0
+        angle_factor = (angle - 30.0) / 5.0
+        total_factor = -0.8 * straight_factor + 0.6 * angle_factor
+        return round({'逃': +total_factor, '追': -total_factor, '両': 0.0}.get(kaku, 0.0), 2)
 
     def bank_length_adjust(kaku, length):
         delta = (length - 400) / 100
@@ -284,7 +284,7 @@ if st.button("スコア計算実行"):
                 return group_bonus.get(group, 0.0)
         return 0.0
 
-    base_score = {'逃': 1.0, '両': 0.8, '追': 0.6}
+    base_score = {'逃': 6.0, '両': 5.5, '追': 5}
 
     line_def = {
         'A': extract_car_list(a_line),
