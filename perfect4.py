@@ -207,56 +207,38 @@ if st.button("スコア計算実行"):
             result.append(correction)
         return result
 
-# --- ここまでが完全移植の基礎補正セット ---
+    def extract_car_list(input_str):
+        return [int(c) for c in input_str if c.isdigit()]
 
-
-    def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
-        if direction == "無風" or speed < 0.5:
-            return 0
-        basic = wind_coefficients.get(direction, 0.0) * speed * position_multipliers.get(pos, 0.0)
-        coeff = {'逃': 1.2, '両': 1.0, '追': 0.8}.get(kaku, 1.0)
-        return round(basic * coeff, 2)
-
-    def score_from_chakujun(pos):
-        correction_map = {1: -0.5, 2: -0.3, 3: -0.2, 4: 0.0, 5: 0.3, 6: 0.2, 7: 0.0, 8: -0.1, 9: -0.2}
-        return correction_map.get(pos, 0.0)
-
-    def rain_adjust(kaku):
-        return {'逃': 1.5, '両': 0.5, '追': -1.5}.get(kaku, 0.0) if rain else 0.0
-
-    def line_member_bonus(pos):
-        return {0: 0.7, 1: 1.0, 2: 0.8, 3: 0.5, 4: 0.3}.get(pos, 0.0)
-
-    def bank_character_bonus(kaku, angle, straight):
-        straight_factor = (straight - 50.0) / 10.0
-        angle_factor = (angle - 30.0) / 5.0
-        total_factor = -0.8 * straight_factor + 0.6 * angle_factor
-        return round({'逃': +total_factor, '追': -total_factor, '両': 0.0}.get(kaku, 0.0), 2)
-
-    def bank_length_adjust(kaku, length):
-        delta = (length - 400) / 100
-        return {'逃': -1.5 * delta, '追': +1.2 * delta, '両': 0.0}.get(kaku, 0.0)
+    def build_line_position_map():
+        result = {}
+        for line, name in zip([a_line, b_line, c_line, d_line, solo_line], ['A', 'B', 'C', 'D', 'S']):
+            cars = extract_car_list(line)
+            for i, car in enumerate(cars):
+                result[car] = 0 if name == 'S' else i + 1
+        return result
 
     def compute_group_bonus(score_parts, line_def):
-        group_scores = {k: 0.0 for k in ['A', 'B', 'C']}
-        group_counts = {k: 0 for k in ['A', 'B', 'C']}
+        group_scores = {k: 0.0 for k in ['A', 'B', 'C', 'D']}
+        group_counts = {k: 0 for k in ['A', 'B', 'C', 'D']}
         for entry in score_parts:
             car_no, score = entry[0], entry[-1]
-            for group in ['A', 'B', 'C']:
+            for group in ['A', 'B', 'C', 'D']:
                 if car_no in line_def[group]:
                     group_scores[group] += score
                     group_counts[group] += 1
                     break
         group_avg = {k: group_scores[k] / group_counts[k] if group_counts[k] > 0 else 0.0 for k in group_scores}
         sorted_lines = sorted(group_avg.items(), key=lambda x: x[1], reverse=True)
-        bonus_map = {group: [0.15, 0.08, 0.03][idx] if idx < 3 else 0.0 for idx, (group, _) in enumerate(sorted_lines)}
+        bonus_map = {group: [0.15, 0.08, 0.03, 0.01][idx] if idx < 4 else 0.0 for idx, (group, _) in enumerate(sorted_lines)}
         return bonus_map
 
     def get_group_bonus(car_no, line_def, group_bonus_map):
-        for group in ['A', 'B', 'C']:
+        for group in ['A', 'B', 'C', 'D']:
             if car_no in line_def[group]:
                 return group_bonus_map.get(group, 0.0)
         return 0.0
+
 
 # --- ライン構成取得 ---
 line_def = {
