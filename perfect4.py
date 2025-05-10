@@ -232,14 +232,14 @@ st.subheader("▼ スコア計算")
 if st.button("スコア計算実行"):
 
     def score_from_tenscore_list(tenscore_list):
-        sorted_unique = sorted(set(tenscore_list), reverse=True)
-        score_to_rank = {score: rank + 1 for rank, score in enumerate(sorted_unique)}
-        result = []
-        for score in tenscore_list:
-            rank = score_to_rank[score]
-            correction = {-5:0.0, -4:0.0, -3: 0.0, -2: 0.2, -1: 0.1, 0: 0.0, 1: -0.1, 2: -0.2 3: -0.3, 4: -0.4,}.get(6 - rank, -0.5)
-            result.append(correction)
-        return result
+    　　　　sorted_unique = sorted(set(tenscore_list), reverse=True)
+    　　　　score_to_rank = {score: rank + 1 for rank, score in enumerate(sorted_unique)}
+    　　　　result = []
+    　　　　for score in tenscore_list:
+       　　　　 rank = score_to_rank[score]
+        　　　　correction = {-5:0.0, -4:0.0, -3: 0.0, -2: 0.2, -1: 0.1, 0: 0.0, 1: -0.1, 2: -0.2, 3: -0.3, 4: -0.4,}.get(6 - rank, -0.5)
+       　　　　 result.append(correction)
+   　　　　 return result
 
     def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
         if direction == "無風" or speed < 0.5:
