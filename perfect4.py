@@ -154,6 +154,13 @@ straight_length = st.number_input("直線距離（例：50m）", min_value=30, m
 wind_direction = st.selectbox("風向き", ["無風", "左上", "上", "右上", "左", "右", "左下", "下", "右下"], key="selected_wind")
 wind_speed = st.number_input("風速（m/s）", min_value=0.0, max_value=10.0, value=0.0, step=0.1)
 
+# --- ライン構成入力（必要な入力欄） ---
+a_line = st.text_input("Aライン（例：137）", max_chars=9)
+b_line = st.text_input("Bライン（例：25）", max_chars=9)
+c_line = st.text_input("Cライン（例：4）", max_chars=9)
+d_line = st.text_input("Dライン（例：6）", max_chars=9)
+solo_line = st.text_input("単騎枠（例：9）", max_chars=9)
+
 # --- スコア構成用補正関数定義 ---
 base_score = {'逃': 1.0, '両': 0.8, '追': 0.6}
 
@@ -196,6 +203,42 @@ def bank_length_adjust(kaku, length):
 # --- スコア計算処理 --- 
 st.subheader("▼ スコア計算")
 if st.button("スコア計算実行"):
+
+    kakushitsu_keys = ['逃', '両', '追']
+    kakushitsu_inputs = {}
+    cols = st.columns(3)
+    for i, k in enumerate(kakushitsu_keys):
+        with cols[i]:
+            st.markdown(f"**{k}**")
+            kakushitsu_inputs[k] = st.text_input("", key=f"kaku_{k}", max_chars=18)
+
+    car_to_kakushitsu = {}
+    for k, val in kakushitsu_inputs.items():
+        for c in val:
+            if c.isdigit():
+                n = int(c)
+                if 1 <= n <= 9:
+                    car_to_kakushitsu[n] = k
+
+    kakushitsu = [car_to_kakushitsu.get(i + 1, '追') for i in range(9)]
+
+    chaku = [st.number_input(f"{i+1}番着順", min_value=1, max_value=9, value=5, step=1, key=f"chaku_{i}") for i in range(9)]
+    rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(9)]
+    tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(9)]
+
+    symbol_input_options = ['◎', '〇', '▲', '△', '×', '無']
+    symbol_bonus = {'◎': 0.6, '〇': 0.4, '▲': 0.3, '△': 0.2, '×': 0.1, '無': 0.0}
+    symbol_inputs = {}
+    cols = st.columns(len(symbol_input_options))
+    for i, sym in enumerate(symbol_input_options):
+        with cols[i]:
+            symbol_inputs[sym] = st.text_input(label=f"{sym}（複数入力可）", key=f"symbol_{sym}", max_chars=18)
+
+    car_to_symbol = {}
+    for sym, input_str in symbol_inputs.items():
+        for c in input_str:
+            if c.isdigit():
+                car_to_symbol[int(c)] = sym
 
     def score_from_tenscore_list(tenscore_list):
         sorted_unique = sorted(set(tenscore_list), reverse=True)
@@ -240,40 +283,19 @@ if st.button("スコア計算実行"):
         return 0.0
 
 
-# --- ライン構成取得 ---
-line_def = {
-    'A': extract_car_list(a_line),
-    'B': extract_car_list(b_line),
-    'C': extract_car_list(c_line),
-    'D': extract_car_list(d_line),
-}
+    # ライン構成取得
+    line_def = {
+        'A': extract_car_list(a_line),
+        'B': extract_car_list(b_line),
+        'C': extract_car_list(c_line),
+    }
+    line_order_map = build_line_position_map()
+    line_order = [line_order_map.get(i + 1, 0) for i in range(7)]
 
-# --- グループ補正計算用関数（A〜D対応） ---
-def compute_group_bonus(score_parts, line_def):
-    group_scores = {k: 0.0 for k in ['A', 'B', 'C', 'D']}
-    group_counts = {k: 0 for k in ['A', 'B', 'C', 'D']}
-    for entry in score_parts:
-        car_no, score = entry[0], entry[-1]
-        for group in ['A', 'B', 'C', 'D']:
-            if car_no in line_def[group]:
-                group_scores[group] += score
-                group_counts[group] += 1
-                break
-    group_avg = {k: group_scores[k] / group_counts[k] if group_counts[k] > 0 else 0.0 for k in group_scores}
-    sorted_lines = sorted(group_avg.items(), key=lambda x: x[1], reverse=True)
-    bonus_map = {group: [0.15, 0.08, 0.03, 0.01][idx] if idx < 4 else 0.0 for idx, (group, _) in enumerate(sorted_lines)}
-    return bonus_map
-
-def get_group_bonus(car_no, line_def, group_bonus_map):
-    for group in ['A', 'B', 'C', 'D']:
-        if car_no in line_def[group]:
-            return group_bonus_map.get(group, 0.0)
-    return 0.0
-    
     # スコア計算
     tenscore_score = score_from_tenscore_list(rating)
     score_parts = []
-    for i in range(9):
+    for i in range(7):
         if not tairetsu[i].isdigit():
             continue
         num = i + 1
