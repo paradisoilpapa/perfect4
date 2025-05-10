@@ -175,6 +175,16 @@ chaku = [st.number_input(f"{i+1}番着順", min_value=1, max_value=9, value=5, s
 st.subheader("▼ 競争得点入力")
 rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(9)]
 
+def score_from_tenscore_list(tenscore_list):
+    sorted_unique = sorted(set(tenscore_list), reverse=True)
+    score_to_rank = {score: rank + 1 for rank, score in enumerate(sorted_unique)}
+    result = []
+    for score in tenscore_list:
+        rank = score_to_rank[score]
+        correction = {-3: 0.0, -2: 0.2, -1: 0.1, 0: 0.0, 1: -0.1, 2: -0.2}.get(4 - rank, -0.4)
+        result.append(correction)
+    return result
+
 st.subheader("▼ 予想隊列入力（数字、欠の場合は空欄）")
 tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(9)]
 
