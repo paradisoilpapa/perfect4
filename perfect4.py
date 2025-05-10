@@ -210,10 +210,10 @@ def extract_car_list(input_str):
 
 def build_line_position_map():
     result = {}
-    for line, name in zip([a_line, b_line, c_line, solo_line], ['A', 'B', 'C', 'D']):
+    for line, name in zip([a_line, b_line, c_line, d_line, solo_line], ['A', 'B', 'C', 'D', 'S']):
         cars = extract_car_list(line)
         for i, car in enumerate(cars):
-            if name == 'D':
+            if name == 'S':
                 result[car] = 0
             else:
                 result[car] = i + 1
