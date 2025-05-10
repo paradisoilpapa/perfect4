@@ -150,20 +150,18 @@ c_line = st.text_input("Cライン（例：4）", max_chars=9)
 d_line = st.text_input("Dライン（例：6）", max_chars=9)
 solo_line = st.text_input("単騎枠（例：9）", max_chars=9)
 
+# --- ライン構成入力（A〜Dライン＋単騎） ---
+st.subheader("▼ ライン構成入力（A〜Dライン＋単騎）")
+a_line = st.text_input("Aライン（例：137）", max_chars=9)
+b_line = st.text_input("Bライン（例：25）", max_chars=9)
+c_line = st.text_input("Cライン（例：4）", max_chars=9)
+d_line = st.text_input("Dライン（例：6）", max_chars=9)
+solo_line = st.text_input("単騎枠（例：9）", max_chars=9)
+
 # --- 雨チェック（最後に） ---
 rain = st.checkbox("雨（滑走・慎重傾向あり）")
 
-# --- バンク・風情報入力 ---
-st.subheader("▼ バンク・風データ入力")
-bank_angle = st.number_input("バンク角度（例：30度）", min_value=0.0, max_value=45.0, value=30.0, step=0.5)
-bank_length = st.number_input("バンク周長（例：400m）", min_value=300, max_value=500, value=400, step=10)
-straight_length = st.number_input("直線距離（例：50m）", min_value=30, max_value=100, value=50, step=5)
-wind_direction = st.selectbox("風向き", ["無風", "左上", "上", "右上", "左", "右", "左下", "下", "右下"], key="selected_wind")
-wind_speed = st.number_input("風速（m/s）", min_value=0.0, max_value=10.0, value=0.0, step=0.1)
 
-
-
-# --- スコア構成用補正関数定義 ---
 base_score = {'逃': 1.0, '両': 0.8, '追': 0.6}
 
 wind_coefficients = {
@@ -223,7 +221,9 @@ for k, val in kakushitsu_inputs.items():
 
 kakushitsu = [car_to_kakushitsu.get(i + 1, '追') for i in range(9)]
 
+st.subheader("▼ 前走着順入力（1〜9着）")
 chaku = [st.number_input(f"{i+1}番着順", min_value=1, max_value=9, value=5, step=1, key=f"chaku_{i}") for i in range(9)]
+st.subheader("▼ 競争得点入力")
 rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(9)]
 tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(9)]
 
