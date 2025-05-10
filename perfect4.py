@@ -200,46 +200,46 @@ def bank_length_adjust(kaku, length):
     delta = (length - 400) / 100
     return {'逃': -1.5 * delta, '追': +1.2 * delta, '両': 0.0}.get(kaku, 0.0)
 
-# --- スコア計算処理 --- 
-st.subheader("▼ スコア計算")
-if st.button("スコア計算実行"):
+# --- 選手データ入力 ---
+st.subheader("▼ 選手データ入力")
 
-    kakushitsu_keys = ['逃', '両', '追']
-    kakushitsu_inputs = {}
-    cols = st.columns(3)
-    for i, k in enumerate(kakushitsu_keys):
-        with cols[i]:
-            st.markdown(f"**{k}**")
-            kakushitsu_inputs[k] = st.text_input("", key=f"kaku_{k}", max_chars=18)
+kakushitsu_keys = ['逃', '両', '追']
+kakushitsu_inputs = {}
+cols = st.columns(3)
+for i, k in enumerate(kakushitsu_keys):
+    with cols[i]:
+        st.markdown(f"**{k}**")
+        kakushitsu_inputs[k] = st.text_input("", key=f"kaku_{k}", max_chars=18)
 
-    car_to_kakushitsu = {}
-    for k, val in kakushitsu_inputs.items():
-        for c in val:
-            if c.isdigit():
-                n = int(c)
-                if 1 <= n <= 9:
-                    car_to_kakushitsu[n] = k
+car_to_kakushitsu = {}
+for k, val in kakushitsu_inputs.items():
+    for c in val:
+        if c.isdigit():
+            n = int(c)
+            if 1 <= n <= 9:
+                car_to_kakushitsu[n] = k
 
-    kakushitsu = [car_to_kakushitsu.get(i + 1, '追') for i in range(9)]
+kakushitsu = [car_to_kakushitsu.get(i + 1, '追') for i in range(9)]
 
-    chaku = [st.number_input(f"{i+1}番着順", min_value=1, max_value=9, value=5, step=1, key=f"chaku_{i}") for i in range(9)]
-    rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(9)]
-    tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(9)]
+chaku = [st.number_input(f"{i+1}番着順", min_value=1, max_value=9, value=5, step=1, key=f"chaku_{i}") for i in range(9)]
+rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(9)]
+tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(9)]
 
-    symbol_input_options = ['◎', '〇', '▲', '△', '×', '無']
-    symbol_bonus = {'◎': 0.6, '〇': 0.4, '▲': 0.3, '△': 0.2, '×': 0.1, '無': 0.0}
-    symbol_inputs = {}
-    cols = st.columns(len(symbol_input_options))
-    for i, sym in enumerate(symbol_input_options):
-        with cols[i]:
-            symbol_inputs[sym] = st.text_input(label=f"{sym}（複数入力可）", key=f"symbol_{sym}", max_chars=18)
+symbol_input_options = ['◎', '〇', '▲', '△', '×', '無']
+symbol_bonus = {'◎': 0.6, '〇': 0.4, '▲': 0.3, '△': 0.2, '×': 0.1, '無': 0.0}
+symbol_inputs = {}
+cols = st.columns(len(symbol_input_options))
+for i, sym in enumerate(symbol_input_options):
+    with cols[i]:
+        symbol_inputs[sym] = st.text_input(label=f"{sym}（複数入力可）", key=f"symbol_{sym}", max_chars=18)
 
-    car_to_symbol = {}
-    for sym, input_str in symbol_inputs.items():
-        for c in input_str:
-            if c.isdigit():
-                car_to_symbol[int(c)] = sym
+car_to_symbol = {}
+for sym, input_str in symbol_inputs.items():
+    for c in input_str:
+        if c.isdigit():
+            car_to_symbol[int(c)] = sym
 
+# --- スコア計算処理 ---
     def score_from_tenscore_list(tenscore_list):
         sorted_unique = sorted(set(tenscore_list), reverse=True)
         score_to_rank = {score: rank + 1 for rank, score in enumerate(sorted_unique)}
@@ -282,6 +282,11 @@ if st.button("スコア計算実行"):
                 return group_bonus_map.get(group, 0.0)
         return 0.0
 
+# --- スコア計算処理 ---
+st.subheader("▼ スコア計算")
+if st.button("スコア計算実行"):
+
+    # ...（前略：既に定義済みの入力・関数は省略）
 
     # ライン構成取得
     line_def = {
