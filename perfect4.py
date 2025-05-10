@@ -142,7 +142,7 @@ bank_length = st.number_input("バンク周長(m)", min_value=300.0, max_value=5
                               value=float(selected_info["bank_length"]))
 
 
-# ▼ 雨チェック（最後に）
+# --- 雨チェック（最後に） ---
 rain = st.checkbox("雨（滑走・慎重傾向あり）")
 
 # --- 【選手データ入力】 ---
@@ -151,7 +151,6 @@ st.header("【選手データ入力】")
 symbol_input_options = ['◎', '〇', '▲', '△', '×', '無']
 
 st.subheader("▼ 脚質入力（逃・両・追：車番を半角数字で入力）")
-
 kakushitsu_keys = ['逃', '両', '追']
 kakushitsu_inputs = {}
 cols = st.columns(3)
@@ -182,8 +181,8 @@ tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in rang
 st.subheader("▼ 政春印入力（各記号ごとに該当車番を入力）")
 symbol_bonus = {'◎': 0.6, '〇': 0.4, '▲': 0.3, '△': 0.2, '×': 0.1, '無': 0.0}
 symbol_inputs = {}
-cols = st.columns(len(symbol_input_options))
-for i, sym in enumerate(symbol_input_options):
+cols = st.columns(len(symbol_bonus))
+for i, sym in enumerate(symbol_bonus):
     with cols[i]:
         symbol_inputs[sym] = st.text_input(label=f"{sym}（複数入力可）", key=f"symbol_{sym}", max_chars=18)
 
@@ -193,7 +192,6 @@ for sym, input_str in symbol_inputs.items():
         if c.isdigit():
             car_to_symbol[int(c)] = sym
 
-# --- ライン構成入力欄（A〜Dライン＋単騎） ---
 st.subheader("▼ ライン構成入力（A〜Dライン＋単騎）")
 a_line = st.text_input("Aライン（例：137）", max_chars=9)
 b_line = st.text_input("Bライン（例：25）", max_chars=9)
@@ -201,7 +199,6 @@ c_line = st.text_input("Cライン（例：4）", max_chars=9)
 d_line = st.text_input("Dライン（例：6）", max_chars=9)
 solo_line = st.text_input("単騎枠（例：9）", max_chars=9)
 
-# --- 補助関数 ---
 def extract_car_list(input_str):
     return [int(c) for c in input_str if c.isdigit()]
 
@@ -210,25 +207,9 @@ def build_line_position_map():
     for line, name in zip([a_line, b_line, c_line, d_line, solo_line], ['A', 'B', 'C', 'D', 'S']):
         cars = extract_car_list(line)
         for i, car in enumerate(cars):
-            if name == 'S':  # 単騎枠
-                result[car] = 0
-            else:
-                result[car] = i + 1
+            result[car] = 0 if name == 'S' else i + 1
     return result
 
-# --- ライン構成取得 ---
-line_def = {
-    'A': extract_car_list(a_line),
-    'B': extract_car_list(b_line),
-    'C': extract_car_list(c_line),
-    'D': extract_car_list(d_line),
-}
-
-# --- スコア計算処理 ---
-st.subheader("▼ スコア計算")
-if st.button("スコア計算実行"):
-
-# --- グループ補正計算用関数（A〜D対応） ---
 def compute_group_bonus(score_parts, line_def):
     group_scores = {k: 0.0 for k in ['A', 'B', 'C', 'D']}
     group_counts = {k: 0 for k in ['A', 'B', 'C', 'D']}
@@ -250,13 +231,14 @@ def get_group_bonus(car_no, line_def, group_bonus_map):
             return group_bonus_map.get(group, 0.0)
     return 0.0
 
-
-    # wind_straight_combo_adjust, rain_adjust, etc. （省略せず既存のままでOK）
-
+# --- スコア計算ボタンと処理 ---
+st.subheader("▼ スコア計算")
+if st.button("スコア計算実行"):
     line_def = {
         'A': extract_car_list(a_line),
         'B': extract_car_list(b_line),
         'C': extract_car_list(c_line),
+        'D': extract_car_list(d_line),
     }
     line_order_map = build_line_position_map()
     line_order = [line_order_map.get(i + 1, 0) for i in range(9)]
@@ -271,7 +253,7 @@ def get_group_bonus(car_no, line_def, group_bonus_map):
         wind = wind_straight_combo_adjust(kakushitsu[i], st.session_state.selected_wind, wind_speed, straight_length, line_order[i])
         kasai = score_from_chakujun(chaku[i])
         rating_score = tenscore_score[i]
-        rain_corr = rain_adjust(kakushitsu[i])
+        rain_corr = rain_adjust(kakushitsu[i]) if rain else 0.0
         symbol_score = symbol_bonus.get(car_to_symbol.get(num, '無'), 0.0)
         line_bonus = line_member_bonus(line_order[i])
         bank_bonus = bank_character_bonus(kakushitsu[i], bank_angle, straight_length)
