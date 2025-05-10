@@ -6,11 +6,29 @@ st.set_page_config(page_title="ライン競輪スコア計算（完全統一版�
 
 st.title("⭐ ライン競輪スコア計算（7車ライン＋政春補正＋欠番対応）⭐")
 
-# --- 定義部分 ---
-wind_coefficients = {"左上": +0.7, "上": +1.0, "右上": +0.7, "左": 0.0, "右": 0.0, "左下": -0.7, "下": -1.0, "右下": -0.7}
-position_multipliers = {1: 1.0, 2: 0.3, 3: 0.1, 0: 1.2}
-base_score = {'逃': 8, '両': 6, '追': 5}
-symbol_bonus = {'◎': 2.0, '〇': 1.5, '▲': 1.0, '△': 0.5, '×': 0.2, '無': 0.0}
+wind_coefficients = {
+    "左上": +0.35,
+    "上": +0.5,
+    "右上": +0.35,
+    "左": -0.1,   # 左風はやや不利（ホーム直線で外から押される）
+    "右": +0.1,   # 右風はやや有利（バック直線で外に膨らみやすい）
+    "左下": -0.35,
+    "下": -0.5,
+    "右下": -0.35
+}
+
+position_multipliers = {
+    0: 1.2,  # 単騎
+    1: 1.0,  # 先頭
+    2: 0.3,
+    3: 0.1,
+    4: 0.05  # 4番手
+}
+
+
+# --- 基本スコア（脚質ごとの基準値） ---
+base_score = {'逃': 6, '両': 5.5, '追': 5}
+symbol_bonus = {'◎': 0.6, '〇': 0.4, '▲': 0.3, '△': 0.2, '×': 0.1, '無': 0.0}
 
 # --- 状態保持 ---
 if "selected_wind" not in st.session_state:
@@ -61,50 +79,51 @@ st.subheader(f"✅ 選択中の風向き：{st.session_state.selected_wind}")
 
 # ▼ 競輪場選択による自動入力
 keirin_data = {
-    "函館": {"bank_angle": 30.6, "straight_length": 51.3},
-    "青森": {"bank_angle": 32.3, "straight_length": 58.9},
-    "いわき平": {"bank_angle": 32.9, "straight_length": 62.7},
-    "弥彦": {"bank_angle": 32.4, "straight_length": 63.1},
-    "前橋": {"bank_angle": 36.0, "straight_length": 46.7},
-    "取手": {"bank_angle": 31.5, "straight_length": 54.8},
-    "宇都宮": {"bank_angle": 25.8, "straight_length": 63.3},
-    "大宮": {"bank_angle": 26.3, "straight_length": 66.7},
-    "西武園": {"bank_angle": 29.4, "straight_length": 47.6},
-    "京王閣": {"bank_angle": 32.2, "straight_length": 51.5},
-    "立川": {"bank_angle": 31.2, "straight_length": 58.0},
-    "松戸": {"bank_angle": 29.8, "straight_length": 38.2},
-    "川崎": {"bank_angle": 32.2, "straight_length": 58.0},
-    "平塚": {"bank_angle": 31.5, "straight_length": 54.2},
-    "小田原": {"bank_angle": 35.6, "straight_length": 36.1},
-    "伊東": {"bank_angle": 34.7, "straight_length": 46.6},
-    "静岡": {"bank_angle": 30.7, "straight_length": 56.4},
-    "名古屋": {"bank_angle": 34.0, "straight_length": 58.8},
-    "岐阜": {"bank_angle": 32.3, "straight_length": 59.3},
-    "大垣": {"bank_angle": 30.6, "straight_length": 56.0},
-    "豊橋": {"bank_angle": 33.8, "straight_length": 60.3},
-    "富山": {"bank_angle": 33.7, "straight_length": 43},
-    "松坂": {"bank_angle": 34.4, "straight_length": 61.5},
-    "四日市": {"bank_angle": 32.3, "straight_length": 62.4},
-    "福井": {"bank_angle": 31.5, "straight_length": 52.8},
-    "奈良": {"bank_angle": 33.4, "straight_length": 38.0},
-    "向日町": {"bank_angle": 30.5, "straight_length": 47.3},
-    "和歌山": {"bank_angle": 32.3, "straight_length": 59.9},
-    "岸和田": {"bank_angle": 30.9, "straight_length": 56.7},
-    "玉野": {"bank_angle": 30.6, "straight_length": 47.9},
-    "広島": {"bank_angle": 30.8, "straight_length": 57.9},
-    "防府": {"bank_angle": 34.7, "straight_length": 42.5},
-    "高松": {"bank_angle": 33.3, "straight_length": 54.8},
-    "小松島": {"bank_angle": 29.8, "straight_length": 55.5},
-    "高知": {"bank_angle": 24.5, "straight_length": 52},
-    "松山": {"bank_angle": 34.0, "straight_length": 58.6},
-    "小倉": {"bank_angle": 34.0, "straight_length": 56.9},
-    "久留米": {"bank_angle": 31.5, "straight_length": 50.7},
-    "武雄": {"bank_angle": 32.0, "straight_length": 64.4},
-    "佐世保": {"bank_angle": 31.5, "straight_length": 40.2},
-    "別府": {"bank_angle": 33.7, "straight_length": 59.9},
-    "熊本": {"bank_angle": 34.3, "straight_length": 60.3},
-    "手入力": {"bank_angle": 30.0, "straight_length": 52}
+    "函館": {"bank_angle": 30.6, "straight_length": 51.3, "bank_length": 400},
+    "青森": {"bank_angle": 32.3, "straight_length": 58.9, "bank_length": 400},
+    "いわき平": {"bank_angle": 32.9, "straight_length": 62.7, "bank_length": 400},
+    "弥彦": {"bank_angle": 32.4, "straight_length": 63.1, "bank_length": 400},
+    "前橋": {"bank_angle": 36.0, "straight_length": 46.7, "bank_length": 335},
+    "取手": {"bank_angle": 31.5, "straight_length": 54.8, "bank_length": 400},
+    "宇都宮": {"bank_angle": 25.8, "straight_length": 63.3, "bank_length": 500},
+    "大宮": {"bank_angle": 26.3, "straight_length": 66.7, "bank_length": 500},
+    "西武園": {"bank_angle": 29.4, "straight_length": 47.6, "bank_length": 400},
+    "京王閣": {"bank_angle": 32.2, "straight_length": 51.5, "bank_length": 400},
+    "立川": {"bank_angle": 31.2, "straight_length": 58.0, "bank_length": 400},
+    "松戸": {"bank_angle": 29.8, "straight_length": 38.2, "bank_length": 333},
+    "川崎": {"bank_angle": 32.2, "straight_length": 58.0, "bank_length": 400},
+    "平塚": {"bank_angle": 31.5, "straight_length": 54.2, "bank_length": 400},
+    "小田原": {"bank_angle": 35.6, "straight_length": 36.1, "bank_length": 333},
+    "伊東": {"bank_angle": 34.7, "straight_length": 46.6, "bank_length": 333},
+    "静岡": {"bank_angle": 30.7, "straight_length": 56.4, "bank_length": 400},
+    "名古屋": {"bank_angle": 34.0, "straight_length": 58.8, "bank_length": 400},
+    "岐阜": {"bank_angle": 32.3, "straight_length": 59.3, "bank_length": 400},
+    "大垣": {"bank_angle": 30.6, "straight_length": 56.0, "bank_length": 400},
+    "豊橋": {"bank_angle": 33.8, "straight_length": 60.3, "bank_length": 400},
+    "富山": {"bank_angle": 33.7, "straight_length": 43.0, "bank_length": 333},
+    "松坂": {"bank_angle": 34.4, "straight_length": 61.5, "bank_length": 400},
+    "四日市": {"bank_angle": 32.3, "straight_length": 62.4, "bank_length": 400},
+    "福井": {"bank_angle": 31.5, "straight_length": 52.8, "bank_length": 400},
+    "奈良": {"bank_angle": 33.4, "straight_length": 38.0, "bank_length": 333},
+    "向日町": {"bank_angle": 30.5, "straight_length": 47.3, "bank_length": 400},
+    "和歌山": {"bank_angle": 32.3, "straight_length": 59.9, "bank_length": 400},
+    "岸和田": {"bank_angle": 30.9, "straight_length": 56.7, "bank_length": 400},
+    "玉野": {"bank_angle": 30.6, "straight_length": 47.9, "bank_length": 400},
+    "広島": {"bank_angle": 30.8, "straight_length": 57.9, "bank_length": 400},
+    "防府": {"bank_angle": 34.7, "straight_length": 42.5, "bank_length": 333},
+    "高松": {"bank_angle": 33.3, "straight_length": 54.8, "bank_length": 400},
+    "小松島": {"bank_angle": 29.8, "straight_length": 55.5, "bank_length": 400},
+    "高知": {"bank_angle": 24.5, "straight_length": 52.0, "bank_length": 500},
+    "松山": {"bank_angle": 34.0, "straight_length": 58.6, "bank_length": 400},
+    "小倉": {"bank_angle": 34.0, "straight_length": 56.9, "bank_length": 400},
+    "久留米": {"bank_angle": 31.5, "straight_length": 50.7, "bank_length": 400},
+    "武雄": {"bank_angle": 32.0, "straight_length": 64.4, "bank_length": 400},
+    "佐世保": {"bank_angle": 31.5, "straight_length": 40.2, "bank_length": 400},
+    "別府": {"bank_angle": 33.7, "straight_length": 59.9, "bank_length": 400},
+    "熊本": {"bank_angle": 34.3, "straight_length": 60.3, "bank_length": 400},
+    "手入力": {"bank_angle": 30.0, "straight_length": 52.0, "bank_length": 400}
 }
+
 
 selected_track = st.selectbox("▼ 競輪場選択（自動入力）", list(keirin_data.keys()))
 selected_info = keirin_data[selected_track]
@@ -112,12 +131,15 @@ selected_info = keirin_data[selected_track]
 # ▼ 風速入力（手動）
 wind_speed = st.number_input("風速(m/s)", min_value=0.0, max_value=30.0, step=0.1, value=3.0)
 
-# ▼ 自動反映される直線長さ・バンク角
+# ▼ 自動反映される直線長さ・バンク角・周長
 straight_length = st.number_input("みなし直線(m)", min_value=30.0, max_value=80.0, step=0.1,
                                   value=float(selected_info["straight_length"]))
 
 bank_angle = st.number_input("バンク角(°)", min_value=20.0, max_value=45.0, step=0.1,
                              value=float(selected_info["bank_angle"]))
+
+bank_length = st.number_input("バンク周長(m)", min_value=300.0, max_value=500.0, step=0.1,
+                              value=float(selected_info["bank_length"]))
 
 
 # ▼ 雨チェック（最後に）
@@ -126,122 +148,143 @@ rain = st.checkbox("雨（滑走・慎重傾向あり）")
 # --- 【選手データ入力】 ---
 st.header("【選手データ入力】")
 
-kakushitsu_options = ['逃', '両', '追']
 symbol_input_options = ['◎', '〇', '▲', '△', '×', '無']
 
-st.subheader("▼ 脚質入力")
-kakushitsu = [st.selectbox(f"{i+1}番脚質", kakushitsu_options, key=f"kaku_{i}") for i in range(7)]
+st.subheader("▼ 脚質入力（逃・両・追：車番を半角数字で入力）")
 
-st.subheader("▼ 前走着順入力（1〜7着）")
-chaku = [st.number_input(f"{i+1}番着順", min_value=1, max_value=7, value=5, step=1, key=f"chaku_{i}") for i in range(7)]
+kakushitsu_keys = ['逃', '両', '追']
+kakushitsu_inputs = {}
+cols = st.columns(3)
+for i, k in enumerate(kakushitsu_keys):
+    with cols[i]:
+        st.markdown(f"**{k}**")
+        kakushitsu_inputs[k] = st.text_input("", key=f"kaku_{k}", max_chars=18)
+
+car_to_kakushitsu = {}
+for k, val in kakushitsu_inputs.items():
+    for c in val:
+        if c.isdigit():
+            n = int(c)
+            if 1 <= n <= 9:
+                car_to_kakushitsu[n] = k
+
+kakushitsu = [car_to_kakushitsu.get(i + 1, '追') for i in range(9)]
+
+st.subheader("▼ 前走着順入力（1〜9着）")
+chaku = [st.number_input(f"{i+1}番着順", min_value=1, max_value=9, value=5, step=1, key=f"chaku_{i}") for i in range(9)]
 
 st.subheader("▼ 競争得点入力")
-rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(7)]
+rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(9)]
 
-st.subheader("▼ 隊列順位入力（数字、欠の場合は空欄）")
-tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(7)]
+st.subheader("▼ 予想隊列入力（数字、欠の場合は空欄）")
+tairetsu = [st.text_input(f"{i+1}番隊列順位", key=f"tai_{i}") for i in range(9)]
 
-st.subheader("▼ ラインポジション入力（0単騎 1先頭 2番手 3三番手）")
-line_order = [
-    st.number_input(f"{i+1}番ラインポジション", min_value=0, max_value=3, step=1, value=0, key=f"line_{i}")
-    for i in range(7)]
+st.subheader("▼ 政春印入力（各記号ごとに該当車番を入力）")
+symbol_bonus = {'◎': 0.6, '〇': 0.4, '▲': 0.3, '△': 0.2, '×': 0.1, '無': 0.0}
+symbol_inputs = {}
+cols = st.columns(len(symbol_input_options))
+for i, sym in enumerate(symbol_input_options):
+    with cols[i]:
+        symbol_inputs[sym] = st.text_input(label=f"{sym}（複数入力可）", key=f"symbol_{sym}", max_chars=18)
 
-st.subheader("▼ 政春印入力（◎〇▲注△×無 → 7文字で一括入力）")
-symbol_input_raw = st.text_input("例：5142637（順に◎〇▲△×注無）", max_chars=7)
+car_to_symbol = {}
+for sym, input_str in symbol_inputs.items():
+    for c in input_str:
+        if c.isdigit():
+            car_to_symbol[int(c)] = sym
 
-# 対応記号（注が無い場合は除外して ['◎','〇','▲','△','×','無'] で6文字でもOK）
-symbol_keys = ['◎', '〇', '▲', '△', '×', '無']
+# --- ライン構成入力欄（A〜Dライン＋単騎） ---
+st.subheader("▼ ライン構成入力（A〜Dライン＋単騎）")
+a_line = st.text_input("Aライン（例：137）", max_chars=9)
+b_line = st.text_input("Bライン（例：25）", max_chars=9)
+c_line = st.text_input("Cライン（例：4）", max_chars=9)
+d_line = st.text_input("Dライン（例：6）", max_chars=9)
+solo_line = st.text_input("単騎枠（例：9）", max_chars=9)
 
-# 入力検証と展開
-if len(symbol_input_raw) == 7 and symbol_input_raw.isdigit():
-    symbol = [c for c in symbol_input_raw]
-else:
-    symbol = [''] * 7  # 空欄用デフォルト
+# --- 補助関数 ---
+def extract_car_list(input_str):
+    return [int(c) for c in input_str if c.isdigit()]
 
-# --- スコア計算 ---
-if st.button("スコア計算実行"):
-
-    def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
-        if direction == "無風" or speed < 0.5:
-            return 0
-        basic = wind_coefficients.get(direction, 0.0) * speed * position_multipliers[pos]
-        coeff = {'逃': 1.2, '両': 1.0, '追': 0.8}.get(kaku, 1.0)
-        return round(basic * coeff, 2)
-
-    def tairyetsu_adjust(num, tairetsu_list):
-        pos = tairetsu_list.index(num)
-        base = max(0, round(3.0 - 0.5 * pos, 1))
-        if kakushitsu[num - 1] == '追':
-            if 2 <= pos <= 4:
-                return base + 0.5 + 1.5
+def build_line_position_map():
+    result = {}
+    for line, name in zip([a_line, b_line, c_line, d_line, solo_line], ['A', 'B', 'C', 'D', 'S']):
+        cars = extract_car_list(line)
+        for i, car in enumerate(cars):
+            if name == 'S':  # 単騎枠
+                result[car] = 0
             else:
-                return base + 0.5
-        return base
+                result[car] = i + 1
+    return result
 
-    def score_from_chakujun(pos):
-        if pos == 1: return 3.0
-        elif pos == 2: return 2.5
-        elif pos == 3: return 2.0
-        elif pos <= 6: return 1.0
-        else: return 0.0
+# --- ライン構成取得 ---
+line_def = {
+    'A': extract_car_list(a_line),
+    'B': extract_car_list(b_line),
+    'C': extract_car_list(c_line),
+    'D': extract_car_list(d_line),
+}
 
-    def rain_adjust(kaku):
-        if not rain:
-            return 0
-        return {'逃': +2.5, '両': +0.5, '追': -2.5}[kaku]
+# --- グループ補正計算用関数（A〜D対応） ---
+def compute_group_bonus(score_parts, line_def):
+    group_scores = {k: 0.0 for k in ['A', 'B', 'C', 'D']}
+    group_counts = {k: 0 for k in ['A', 'B', 'C', 'D']}
+    for entry in score_parts:
+        car_no, score = entry[0], entry[-1]
+        for group in ['A', 'B', 'C', 'D']:
+            if car_no in line_def[group]:
+                group_scores[group] += score
+                group_counts[group] += 1
+                break
+    group_avg = {k: group_scores[k] / group_counts[k] if group_counts[k] > 0 else 0.0 for k in group_scores}
+    sorted_lines = sorted(group_avg.items(), key=lambda x: x[1], reverse=True)
+    bonus_map = {group: [0.15, 0.08, 0.03, 0.01][idx] if idx < 4 else 0.0 for idx, (group, _) in enumerate(sorted_lines)}
+    return bonus_map
 
-    def line_member_bonus(pos):
-        if pos == 0:
-            return -1.0
-        elif pos == 1:
-            return 2.0
-        elif pos == 2:
-            return 1.5
-        elif pos == 3:
-            return 1.0
-        return 0.0
-
-    def bank_character_bonus(kaku, angle, straight):
-        base_straight = 50.0
-        base_angle = 30.0
-
-        straight_factor = (straight - base_straight) / 10.0
-        angle_factor = (angle - base_angle) / 5.0
-
-        total_factor = -0.8 * straight_factor + 0.6 * angle_factor
-
-        bonus = {
-            '逃': +total_factor,
-            '追': -total_factor,
-            '両': 0.0
-        }.get(kaku, 0.0)
-
-        return round(bonus, 2)
+def get_group_bonus(car_no, line_def, group_bonus_map):
+    for group in ['A', 'B', 'C', 'D']:
+        if car_no in line_def[group]:
+            return group_bonus_map.get(group, 0.0)
+    return 0.0
 
 
+    # wind_straight_combo_adjust, rain_adjust, etc. （省略せず既存のままでOK）
 
-    tairetsu_list = [i+1 for i, v in enumerate(tairetsu) if v.isdigit()]
+    line_def = {
+        'A': extract_car_list(a_line),
+        'B': extract_car_list(b_line),
+        'C': extract_car_list(c_line),
+    }
+    line_order_map = build_line_position_map()
+    line_order = [line_order_map.get(i + 1, 0) for i in range(9)]
 
+    tenscore_score = score_from_tenscore_list(rating)
     score_parts = []
-    for i in range(7):
+    for i in range(9):
         if not tairetsu[i].isdigit():
             continue
         num = i + 1
         base = base_score[kakushitsu[i]]
         wind = wind_straight_combo_adjust(kakushitsu[i], st.session_state.selected_wind, wind_speed, straight_length, line_order[i])
-        tai = tairyetsu_adjust(num, tairetsu_list)
         kasai = score_from_chakujun(chaku[i])
-        rating_score = max(0, round((sum(rating)/7 - rating[i]) * 0.2, 1))
+        rating_score = tenscore_score[i]
         rain_corr = rain_adjust(kakushitsu[i])
-        symbol_bonus_score = symbol_bonus[symbol[i]]
+        symbol_score = symbol_bonus.get(car_to_symbol.get(num, '無'), 0.0)
         line_bonus = line_member_bonus(line_order[i])
         bank_bonus = bank_character_bonus(kakushitsu[i], bank_angle, straight_length)
-        total = base + wind + tai + kasai + rating_score + rain_corr + symbol_bonus_score + line_bonus + bank_bonus
+        length_bonus = bank_length_adjust(kakushitsu[i], bank_length)
+        total = base + wind + kasai + rating_score + rain_corr + symbol_score + line_bonus + bank_bonus + length_bonus
+        score_parts.append([num, kakushitsu[i], base, wind, kasai, rating_score, rain_corr, symbol_score, line_bonus, bank_bonus, length_bonus, total])
 
-        score_parts.append((num, kakushitsu[i], base, wind, tai, kasai, rating_score, rain_corr, symbol_bonus_score, line_bonus, bank_bonus, total))
+    group_bonus_map = compute_group_bonus(score_parts, line_def)
+    final_score_parts = []
+    for row in score_parts:
+        group_corr = get_group_bonus(row[0], line_def, group_bonus_map)
+        new_total = row[-1] + group_corr
+        final_score_parts.append(row[:-1] + [group_corr, new_total])
 
-    df = pd.DataFrame(score_parts, columns=[
-        '車番', '脚質', '基本', '風補正', '隊列補正', '着順補正', '得点補正', '雨補正', '政春印補正', 'ライン補正', 'バンク補正', '合計スコア'
+    df = pd.DataFrame(final_score_parts, columns=[
+        '車番', '脚質', '基本', '風補正', '着順補正', '得点補正',
+        '雨補正', '政春印補正', 'ライン補正', 'バンク補正', '周長補正',
+        'グループ補正', '合計スコア'
     ])
     st.dataframe(df.sort_values(by='合計スコア', ascending=False).reset_index(drop=True))
-
