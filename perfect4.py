@@ -239,7 +239,7 @@ for sym, input_str in symbol_inputs.items():
         if c.isdigit():
             car_to_symbol[int(c)] = sym
 
-# --- スコア計算処理 ---
+# --- 補助関数（スコア計算内） ---
     def score_from_tenscore_list(tenscore_list):
         sorted_unique = sorted(set(tenscore_list), reverse=True)
         score_to_rank = {score: rank + 1 for rank, score in enumerate(sorted_unique)}
@@ -282,7 +282,6 @@ for sym, input_str in symbol_inputs.items():
                 return group_bonus_map.get(group, 0.0)
         return 0.0
 
-# --- スコア計算処理 ---
 st.subheader("▼ スコア計算")
 if st.button("スコア計算実行"):
 
