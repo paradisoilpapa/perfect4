@@ -27,7 +27,7 @@ position_multipliers = {
 
 
 # --- 基本スコア（脚質ごとの基準値） ---
-base_score = {'逃': 6, '両': 5.5, '追': 5}
+base_score = {'逃': 5.3, '両': 5.0, '追': 4.7}
 symbol_bonus = {'◎': 0.6, '〇': 0.4, '▲': 0.3, '△': 0.2, '×': 0.1, '無': 0.0}
 
 # --- 状態保持 ---
@@ -165,8 +165,18 @@ for k, val in kakushitsu_inputs.items():
 
 kakushitsu = [car_to_kakushitsu.get(i + 1, '追') for i in range(9)]
 
-st.subheader("▼ 前走着順入力（1〜9着）")
-chaku = [st.number_input(f"{i+1}番着順", min_value=1, max_value=9, value=5, step=1, key=f"chaku_{i}") for i in range(9)]
+st.subheader("▼ 前々走・前走の着順入力（1〜9着 または 0＝落車）")
+
+# 9選手 × 2走分
+chaku_inputs = []  # [[前々走, 前走], ..., [前々走, 前走]]
+
+for i in range(9):
+    col1, col2 = st.columns(2)
+    with col1:
+        chaku1 = st.text_input(f"{i+1}番【前々走】", value="", key=f"chaku1_{i}")
+    with col2:
+        chaku2 = st.text_input(f"{i+1}番【前走】", value="", key=f"chaku2_{i}")
+    chaku_inputs.append([chaku1, chaku2])
 
 st.subheader("▼ 競争得点入力")
 rating = [st.number_input(f"{i+1}番得点", value=55.0, step=0.1, key=f"rate_{i}") for i in range(9)]
@@ -232,99 +242,135 @@ if st.button("スコア計算実行"):
         result = []
         for score in tenscore_list:
             rank = score_to_rank[score]
-            correction = {-5:-0.25, -4:-0.2, -3: -0.15, -2: -0.1, -1: -0.05, 0: 0.0, 1: 0.05, 2: 0.1, 3: 0.15, 4: 0.2,}.get(6 - rank, 0.25)
+            correction = {-5:-0.2, -4:-0.15, -3: -0.1, -2: -0.05, -1: 0.0, 0: 0.05, 1: 0.1, 2: 0.15, 3: 0.2, 4: 0.25,}.get(6 - rank, 0.3)
             result.append(correction)
         return result
 
-    def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
+     def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
         if direction == "無風" or speed < 0.5:
             return 0
-        basic = wind_coefficients.get(direction, 0.0) * speed * position_multipliers.get(pos, 0.0)
-        coeff = {'逃': 1.2, '両': 1.0, '追': 0.8}.get(kaku, 1.0)
-        return round(basic * coeff, 2)
 
-    def score_from_chakujun(pos):
-        correction_map ={1: -0.5, 2: -0.3, 3: -0.2, 4: 0.0, 5: 0.3, 6: 0.2, 7: 0.0, 8: 0.0, 9: 0.0}
-        return correction_map.get(pos, 0.0)
+        base = wind_coefficients.get(direction, 0.0)
+        pos_mult = position_multipliers.get(pos, 0.0)
+
+        kaku_coeff = {
+            '逃': +0.4,
+            '両':  0.0,
+            '追': -0.4
+        }.get(kaku, 1.0)
+
+        basic = base * speed * pos_mult
+        return round(basic * kaku_coeff * 0.3, 2)
+
+    def convert_chaku_to_score(values):
+        scores = []
+        for v in values:
+            v = v.strip()
+            try:
+                chaku = int(v)
+                if chaku == 0:
+                    scores.append(0.0)
+                elif 1 <= chaku <= 9:
+                    scores.append(round(1.0 / chaku, 2))
+            except ValueError:
+                continue
+
+        if not scores:
+            return None
+        else:
+            return round(sum(scores) / len(scores), 2)
 
 
     def rain_adjust(kaku):
-        return {'逃': 1.5, '両': 0.5, '追': -1.5}.get(kaku, 0.0) if rain else 0.0
-
+        return {'逃': 0.4, '両': 0.1, '追': -0.4}.get(kaku, 0.0) if rain else 0.0
+        
     def line_member_bonus(pos):
         return {0: 0.7, 1: 1.0, 2: 0.8, 3: 0.5, 4: 0.3}.get(pos, 0.0)
 
     def bank_character_bonus(kaku, angle, straight):
-        straight_factor = (straight - 50.0) / 10.0
-        angle_factor = (angle - 30.0) / 5.0
-        total_factor = -0.8 * straight_factor + 0.6 * angle_factor
+        straight_factor = (straight - 40.0) / 10.0
+        angle_factor = (angle - 25.0) / 5.0
+        total_factor = -0.4 * straight_factor + 0.3 * angle_factor
         return round({'逃': +total_factor, '追': -total_factor, '両': 0.0}.get(kaku, 0.0), 2)
-
-    def bank_length_adjust(kaku, length):
+        
+     def bank_length_adjust(kaku, length):
         delta = (length - 400) / 100
-        return {'逃': -1.5 * delta, '追': +1.2 * delta, '両': 0.0}.get(kaku, 0.0)
+        return {'逃': -0.75 * delta, '追': +0.6 * delta, '両': 0.0}.get(kaku, 0.0)
 
     def compute_group_bonus(score_parts, line_def):
-        groups = {k: 0.0 for k in ['A', 'B', 'C', 'D']}
-        counts = {k: 0 for k in ['A', 'B', 'C', 'D']}
-        for row in score_parts:
-            car_no, total = row[0], row[-1]
-            for group in groups:
+        group_scores = {k: 0.0 for k in ['A', 'B', 'C', 'D']}
+        group_counts = {k: 0 for k in ['A', 'B', 'C', 'D']}
+        for entry in score_parts:
+            car_no, score = entry[0], entry[-1]
+            for group in ['A', 'B', 'C', 'D']:
                 if car_no in line_def[group]:
-                    groups[group] += total
-                    counts[group] += 1
-        avg = {k: groups[k]/counts[k] if counts[k] else 0.0 for k in groups}
-        sorted_g = sorted(avg.items(), key=lambda x: x[1], reverse=True)
-        bonus_map = {g: [0.15, 0.08, 0.03, 0.01][i] for i, (g, _) in enumerate(sorted_g)}
+                    group_scores[group] += score
+                    group_counts[group] += 1
+                    break
+        group_avg = {k: group_scores[k] / group_counts[k] if group_counts[k] > 0 else 0.0 for k in group_scores}
+        sorted_lines = sorted(group_avg.items(), key=lambda x: x[1], reverse=True)
+        bonus_map = {group: [0.5, 0.3, 0.15, 0.5][idx] if idx < 4 else 0.0 for idx, (group, _)  in enumerate(sorted_lines)}
         return bonus_map
 
-    def get_group_bonus(car_no, line_def, group_bonus):
-        for group in line_def:
+
+    def get_group_bonus(car_no, line_def, group_bonus_map):
+        for group in ['A', 'B', 'C']:
             if car_no in line_def[group]:
-                return group_bonus.get(group, 0.0)
+                return group_bonus_map.get(group, 0.0)
+        if '単騎' in line_def and car_no in line_def['単騎']:
+            return 1.5
         return 0.0
 
-    base_score = {'逃': 6.0, '両': 5.5, '追': 5}
-
+ # ライン構成取得
     line_def = {
         'A': extract_car_list(a_line),
         'B': extract_car_list(b_line),
         'C': extract_car_list(c_line),
-        'D': extract_car_list(d_line)
-    }
-    all_lines = [a_line, b_line, c_line, d_line, solo_line]
-    line_order_map = {}
-    for line, name in zip(all_lines, ['A', 'B', 'C', 'D', 'S']):
-        for i, car in enumerate(extract_car_list(line)):
-            line_order_map[car] = 0 if name == 'S' else i + 1
+        'D': extract_car_list(c_line),
+        '単騎': extract_car_list(solo_line)  # tanki → solo_line に合わせて
+        }
 
-    line_order = [line_order_map.get(i+1, 0) for i in range(9)]
+    line_order_map = build_line_position_map()
+    line_order = [line_order_map.get(i + 1, 0) for i in range(9)]
+
+
+# スコア計算
     tenscore_score = score_from_tenscore_list(rating)
-
     score_parts = []
+
     for i in range(9):
         if not tairetsu[i].isdigit():
             continue
-        num = i + 1
-        base = base_score[kakushitsu[i]]
-        wind = wind_straight_combo_adjust(
-    kakushitsu[i],
-    st.session_state.selected_wind,
-    wind_speed,
-    straight_length,
-    line_order[i]
-)
 
-        kasai = score_from_chakujun(chaku[i])
+        num = i + 1
+        kaku = car_to_kakushitsu.get(num, "追")
+        base = base_score[kaku]
+
+        wind = wind_straight_combo_adjust(
+            kaku,
+            st.session_state.selected_wind,
+            wind_speed,
+            straight_length,
+            line_order[i]
+        )
+
+        chaku_values = chaku_inputs[i]
+        kasai = convert_chaku_to_score(chaku_inputs[i]) or 0.0
         rating_score = tenscore_score[i]
-        rain_corr = rain_adjust(kakushitsu[i])
+        rain_corr = rain_adjust(kaku)
         symbol_score = symbol_bonus.get(car_to_symbol.get(num, '無'), 0.0)
         line_bonus = line_member_bonus(line_order[i])
-        bank_bonus = bank_character_bonus(kakushitsu[i], bank_angle, straight_length)
-        length_bonus = bank_length_adjust(kakushitsu[i], bank_length)
-        total = base + wind + kasai + rating_score + rain_corr + symbol_score + line_bonus + bank_bonus + length_bonus
-        score_parts.append([num, kakushitsu[i], base, wind, kasai, rating_score, rain_corr, symbol_score, line_bonus, bank_bonus, length_bonus, total])
+        bank_bonus = bank_character_bonus(kaku, bank_angle, straight_length)
+        length_bonus = bank_length_adjust(kaku, bank_length)
 
+        total = base + wind + kasai + rating_score + rain_corr + symbol_score + line_bonus + bank_bonus + length_bonus
+
+        score_parts.append([
+            num, kaku, base, wind, kasai, rating_score,
+            rain_corr, symbol_score, line_bonus, bank_bonus, length_bonus, total
+        ])
+
+    # グループ補正
     group_bonus_map = compute_group_bonus(score_parts, line_def)
     final_score_parts = []
     for row in score_parts:
@@ -332,6 +378,8 @@ if st.button("スコア計算実行"):
         new_total = row[-1] + group_corr
         final_score_parts.append(row[:-1] + [group_corr, new_total])
 
+
+    # 表示
     df = pd.DataFrame(final_score_parts, columns=[
         '車番', '脚質', '基本', '風補正', '着順補正', '得点補正',
         '雨補正', '政春印補正', 'ライン補正', 'バンク補正', '周長補正',
