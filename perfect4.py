@@ -246,7 +246,7 @@ if st.button("スコア計算実行"):
             result.append(correction)
         return result
 
-     def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
+    def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
         if direction == "無風" or speed < 0.5:
             return 0
 
@@ -293,7 +293,7 @@ if st.button("スコア計算実行"):
         total_factor = -0.4 * straight_factor + 0.3 * angle_factor
         return round({'逃': +total_factor, '追': -total_factor, '両': 0.0}.get(kaku, 0.0), 2)
         
-     def bank_length_adjust(kaku, length):
+    def bank_length_adjust(kaku, length):
         delta = (length - 400) / 100
         return {'逃': -0.75 * delta, '追': +0.6 * delta, '両': 0.0}.get(kaku, 0.0)
 
