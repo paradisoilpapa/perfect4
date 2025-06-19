@@ -1,4 +1,4 @@
-import streamlit as st
+iimport streamlit as st
 import pandas as pd
 
 # --- ページ設定 ---
@@ -28,7 +28,7 @@ position_multipliers = {
 
 
 # --- 基本スコア（脚質ごとの基準値） ---
-base_score = {'逃': 5.0, '両': 4.9, '追': 4.7}
+base_score = {'逃': 4.7, '両': 4.8, '追': 5.0}
 
 # --- 状態保持 ---
 if "selected_wind" not in st.session_state:
@@ -230,14 +230,24 @@ if st.button("スコア計算実行"):
         return [int(c) for c in input_str if c.isdigit()]
 
     def score_from_tenscore_list(tenscore_list):
-        sorted_unique = sorted(set(tenscore_list), reverse=True)
-        score_to_rank = {score: rank + 1 for rank, score in enumerate(sorted_unique)}
-        result = []
-        for score in tenscore_list:
-            rank = score_to_rank[score]
-            correction = {-5: 0.0, -4: 0.0, -3: 0.0, -2: 0.0, -1: 0.0, 0: 0.0, 1: 0., 2: 0.1, 3: 0.13, 4: 0.2,}.get(6 - rank, 0.0)
-            result.append(correction)
-        return result
+        import pandas as pd
+    
+        df = pd.DataFrame({"得点": tenscore_list})
+        df["順位"] = df["得点"].rank(ascending=False, method="min").astype(int)
+    
+        # 基準点：2〜6位の平均
+        baseline = df[df["順位"].between(2, 6)]["得点"].mean()
+    
+        # 2〜4位だけ補正（差分の3％、必ず正の加点）
+        def apply_targeted_correction(row):
+            if row["順位"] in [2, 3, 4]:
+                correction = abs(baseline - row["得点"]) * 0.03
+                return round(correction, 3)
+            else:
+                return 0.0
+    
+        df["最終補正値"] = df.apply(apply_targeted_correction, axis=1)
+        return df["最終補正値"].tolist()
 
     def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
         if direction == "無風" or speed < 0.5:
@@ -259,24 +269,21 @@ if st.button("スコア計算実行"):
 
     def convert_chaku_to_score(values):
         scores = []
-        for i, v in enumerate(values):
+        for i, v in enumerate(values):  # i=0: 前走, i=1: 前々走
             v = v.strip()
             try:
                 chaku = int(v)
-                if chaku == 0:
-                    score = 0.0
-                elif 1 <= chaku <= 9:
-                    score = round(1.0 / chaku, 2)
-                    if i == 1:  # 2番目（前々走）だけ過小評価
+                if 1 <= chaku <= 9:
+                    score = (10 - chaku) / 9
+                    if i == 1:  # 前々走のみ補正
                         score *= 0.7
                     scores.append(score)
             except ValueError:
                 continue
-
         if not scores:
             return None
-        else:
-            return round(sum(scores) / len(scores), 2)
+        return round(sum(scores) / len(scores), 2)
+
 
 
     def lap_adjust(kaku, laps):
@@ -382,7 +389,7 @@ if st.button("スコア計算実行"):
         kasai = convert_chaku_to_score(chaku_inputs[i]) or 0.0
         rating_score = tenscore_score[i]
         rain_corr = lap_adjust(kaku, laps)
-        s_bonus = 0.05 * st.session_state.get(f"s_point_{num}", 0)
+        s_bonus = -0.01 * st.session_state.get(f"s_point_{num}", 0)
         b_bonus = 0.05 * st.session_state.get(f"b_point_{num}", 0)
         symbol_score = s_bonus + b_bonus
         line_bonus = line_member_bonus(line_order[i])
@@ -413,3 +420,139 @@ if st.button("スコア計算実行"):
         'グループ補正', '合計スコア'
     ])
     st.dataframe(df.sort_values(by='合計スコア', ascending=False).reset_index(drop=True))
+    
+try:
+    if not final_score_parts:
+        st.warning("スコアが計算されていません。入力や処理を確認してください。")
+        st.stop()
+except NameError:
+    st.warning("スコアデータが定義されていません。入力に問題がある可能性があります。")
+    st.stop()
+    
+import pandas as pd
+import streamlit as st
+
+# --- B回数列の統一 ---
+df.rename(columns={"バック": "B回数"}, inplace=True)
+b_list = [st.session_state.get(f"b_point_{i+1}", 0) for i in range(len(df))]
+if len(b_list) != len(df):
+    st.error("⚠ B回数の数が選手数と一致していません")
+    st.stop()
+df["B回数"] = b_list
+
+# --- ライン構成取得 ---
+line_def_raw = {
+    'A': extract_car_list(a_line),
+    'B': extract_car_list(b_line),
+    'C': extract_car_list(c_line),
+    'D': extract_car_list(d_line),
+    '単騎': extract_car_list(solo_line)
+}
+
+# 単騎が複数ある場合は分割して個別ライン扱いに変更
+line_def = {k: v for k, v in line_def_raw.items() if k != '単騎'}
+solo_members = line_def_raw.get('単騎', [])
+for i, solo_car in enumerate(solo_members):
+    line_def[f'単騎{i+1}'] = [solo_car]
+
+# --- 合計スコアで並び替え ---
+df_sorted = df.sort_values(by="合計スコア", ascending=False).reset_index(drop=True)
+top_score = df_sorted.iloc[0]["合計スコア"]
+df_top_range = df[df["合計スコア"] >= top_score - 0.5].copy()
+df_top_range["構成評価"] = (
+    df_top_range["着順補正"] * 0.8 +
+    df_top_range["SB印補正"] * 1.2 +
+    df_top_range["ライン補正"] * 0.4 +
+    df_top_range["グループ補正"] * 0.2
+)
+anchor_row = df_top_range.sort_values(by="構成評価", ascending=False).iloc[0]
+anchor_index = int(anchor_row["車番"])
+
+# --- main_line 定義 ---
+def find_line(car_no):
+    for k, v in line_def.items():
+        if car_no in v:
+            return k
+    return None
+
+main_line_key = find_line(anchor_index)
+main_line_cars = line_def.get(main_line_key, [])
+
+# --- 潰しライン（スコア上位3から main_line を除いたライン） ---
+score_top3 = df_sorted.iloc[:3].copy()
+tsubushi_line_key = None
+for i in range(1, 3):
+    candidate = int(score_top3.iloc[i]["車番"])
+    line_k = find_line(candidate)
+    if line_k and line_k != main_line_key:
+        tsubushi_line_key = line_k
+        break
+
+# --- フォーメーション構成選出 ---
+selection_reason = [f"◎（起点）：{anchor_index}（構成評価上位）"]
+final_candidates = [anchor_index]
+
+if len(main_line_cars) >= 4:
+    for car in main_line_cars:
+        if car != anchor_index:
+            final_candidates.append(car)
+            selection_reason.append(f"メインライン：{car}")
+        if len(final_candidates) >= 4:
+            break
+else:
+    main_df = df[df["車番"].isin(main_line_cars) & (df["車番"] != anchor_index)].copy()
+    main_df["構成評価"] = (
+        main_df["着順補正"] * 0.8 +
+        main_df["SB印補正"] * 1.2 +
+        main_df["ライン補正"] * 0.4 +
+        main_df["グループ補正"] * 0.2
+    )
+    for _, row in main_df.sort_values(by="構成評価", ascending=False).iterrows():
+        picked = int(row["車番"])
+        final_candidates.append(picked)
+        selection_reason.append(f"メインライン：{picked}")
+        if len(final_candidates) >= 4:
+            break
+
+    if len(final_candidates) < 4:
+        gyofu_line_keys = [k for k in line_def.keys() if k not in [main_line_key, tsubushi_line_key]]
+        gyofu_line_candidates = []
+        for k in gyofu_line_keys:
+            members = line_def[k]
+            if not members:
+                continue
+            sub_df = df[df["車番"].isin(members)].copy()
+            sub_df["構成評価"] = (
+                sub_df["着順補正"] * 0.8 +
+                sub_df["SB印補正"] * 1.2 +
+                sub_df["ライン補正"] * 0.4 +
+                sub_df["グループ補正"] * 0.2
+            )
+            if len(sub_df) >= 1:
+                avg_score = sub_df["構成評価"].mean()
+                gyofu_line_candidates.append((k, avg_score, sub_df))
+
+        gyofu_line_candidates.sort(key=lambda x: x[1], reverse=True)
+        if gyofu_line_candidates:
+            best_gyofu_line = gyofu_line_candidates[0][2].sort_values(by="構成評価", ascending=False)
+            for _, row in best_gyofu_line.iterrows():
+                if len(final_candidates) >= 4:
+                    break
+                picked = int(row["車番"])
+                if picked not in final_candidates:
+                    final_candidates.append(picked)
+                    selection_reason.append(f"漁夫の利ライン：{picked}")
+
+# --- 最終出力（4車に制限） ---
+final_candidates = final_candidates[:4]
+selection_reason = selection_reason[:4]
+
+# --- 表示関数で出力を統一 ---
+def show_final_output(reasons, candidates):
+    st.markdown("### 🎯 フォーメーション構成")
+    for reason in reasons:
+        st.markdown(f"- {reason}")
+    st.markdown(f"👉 **三連複4点：BOX（{', '.join(map(str, candidates))}）**")
+
+# 出力表示（1回だけ）
+show_final_output(selection_reason, final_candidates)
