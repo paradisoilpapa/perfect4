@@ -429,8 +429,164 @@ except NameError:
     st.warning("スコアデータが定義されていません。入力に問題がある可能性があります。")
     st.stop()
     
+
+from itertools import combinations
 import pandas as pd
 import streamlit as st
+
+# --- B回数列の統一 ---
+df.rename(columns={"バック": "B回数"}, inplace=True)
+b_list = [st.session_state.get(f"b_point_{i+1}", 0) for i in range(len(df))]
+if len(b_list) != len(df):
+    st.error("⚠ B回数の数が選手数と一致していません")
+    st.stop()
+df["B回数"] = b_list
+
+# --- ライン構成取得 ---
+line_def_raw = {
+    'A': extract_car_list(a_line),
+    'B': extract_car_list(b_line),
+    'C': extract_car_list(c_line),
+    'D': extract_car_list(d_line),
+    '単騎': extract_car_list(solo_line)
+}
+
+# 単騎が複数ある場合は個別化
+line_def = {k: v for k, v in line_def_raw.items() if k != '単騎'}
+solo_members = line_def_raw.get('単騎', [])
+for i, solo_car in enumerate(solo_members):
+    line_def[f'単騎{i+1}'] = [solo_car]
+
+# --- ◎決定 ---
+df_sorted = df.sort_values(by="合計スコア", ascending=False).reset_index(drop=True)
+top_score = df_sorted.iloc[0]["合計スコア"]
+df_top_range = df[df["合計スコア"] >= top_score - 0.5].copy()
+df_top_range["構成評価"] = (
+    df_top_range["着順補正"] * 0.8 +
+    df_top_range["SB印補正"] * 1.2 +
+    df_top_range["ライン補正"] * 0.4 +
+    df_top_range["グループ補正"] * 0.2
+)
+anchor_row = df_top_range.sort_values(by="構成評価", ascending=False).iloc[0]
+anchor = int(anchor_row["車番"])
+
+# --- ライン分類 ---
+def find_line(car_no):
+    for k, v in line_def.items():
+        if car_no in v:
+            return k
+    return None
+
+main_line_key = find_line(anchor)
+main_line = line_def.get(main_line_key, [])
+
+# 潰しライン（スコア上位3から本命を除外）
+score_top3 = df_sorted.iloc[:3].copy()
+tsubushi_line_key = None
+for i in range(1, 3):
+    candidate = int(score_top3.iloc[i]["車番"])
+    line_k = find_line(candidate)
+    if line_k and line_k != main_line_key:
+        tsubushi_line_key = line_k
+        break
+
+# 漁夫ライン
+gyofu_keys = [k for k in line_def if k not in [main_line_key, tsubushi_line_key]]
+
+a_line = main_line
+b_line = line_def.get(tsubushi_line_key, [])
+c_line = []
+for k in gyofu_keys:
+    c_line.extend(line_def[k])
+
+# --- 三連複構成抽出 ---
+a_others = [a for a in a_line if a != anchor]
+kumi_awase = {"構成①": [], "構成②": [], "構成③": []}
+selection_reason = {"構成①": [], "構成②": [], "構成③": []}
+
+# 構成①：◎–A–C（本命＋漁夫）
+if len(a_others) >= 1 and len(c_line) >= 1:
+    a_df = df[df["車番"].isin(a_others)].copy()
+    c_df = df[df["車番"].isin(c_line)].copy()
+    for d in [a_df, c_df]:
+        d["構成評価"] = (
+            d["着順補正"] * 0.8 +
+            d["SB印補正"] * 1.2 +
+            d["ライン補正"] * 0.4 +
+            d["グループ補正"] * 0.2
+        )
+    a_top2 = list(a_df.sort_values(by="構成評価", ascending=False)["車番"][:2])
+    c_top2 = list(c_df.sort_values(by="構成評価", ascending=False)["車番"][:2])
+    count = 0
+    for a in a_top2:
+        for c in c_top2:
+            if count >= 2:
+                break
+            if a == c:
+                continue
+            kumi = tuple(sorted([anchor, a, c]))
+            kumi_awase["構成①"].append(kumi)
+            selection_reason["構成①"].append(f"◎({anchor})–A({a})–C({c})：本命＋漁夫構成")
+            count += 1
+        if count >= 2:
+            break
+
+# 構成②：Bスコア上位2車＋Aラインから1車
+if len(b_line) >= 2 and len(a_line) >= 1:
+    b_df = df[df["車番"].isin(b_line)].copy()
+    b_df["構成評価"] = (
+        b_df["着順補正"] * 0.8 +
+        b_df["SB印補正"] * 1.2 +
+        b_df["ライン補正"] * 0.4 +
+        b_df["グループ補正"] * 0.2
+    )
+    b_top2 = list(b_df.sort_values(by="構成評価", ascending=False)["車番"][:2])
+    a_df = df[df["車番"].isin(a_line)].copy()
+    a_df["構成評価"] = (
+        a_df["着順補正"] * 0.8 +
+        a_df["SB印補正"] * 1.2 +
+        a_df["ライン補正"] * 0.4 +
+        a_df["グループ補正"] * 0.2
+    )
+    a_top2 = list(a_df.sort_values(by="構成評価", ascending=False)["車番"][:2])
+    max_combinations_struct2 = 1 if len(b_line) <= 2 else 2
+    count = 0
+    for a in a_top2:
+        kumi = tuple(sorted([b_top2[0], b_top2[1], a]))
+        if kumi not in kumi_awase["構成①"] + kumi_awase["構成②"] + kumi_awase["構成③"]:
+            kumi_awase["構成②"].append(kumi)
+            selection_reason["構成②"].append(f"B({b_top2[0]},{b_top2[1]})–A({a}):潰れ残り保険")
+            count += 1
+        if count >= max_combinations_struct2:
+            break
+
+# 構成③：C–A–B（荒れ展開）→ 1点
+if len(c_line) >= 1 and len(a_others) >= 1 and len(b_line) >= 1:
+    c = c_line[0]
+    a = a_others[0]
+    b = b_line[0]
+    kumi = tuple(sorted([c, a, b]))
+    if kumi not in kumi_awase["構成①"] + kumi_awase["構成②"]:
+        kumi_awase["構成③"].append(kumi)
+        selection_reason["構成③"].append(f"C({c})–A({a})–B({b})：荒れ展開対応")
+
+# --- 最終出力（構成順に並べる） ---
+final_candidates = kumi_awase["構成①"] + kumi_awase["構成②"] + kumi_awase["構成③"]
+selection_reason_flat = selection_reason["構成①"] + selection_reason["構成②"] + selection_reason["構成③"]
+
+# ライン表示まとめ
+st.markdown("### 🔹 ライン定義")
+st.markdown(f"- 本命ライン（A）：{sorted(a_line)}")
+st.markdown(f"- 対抗ライン（B）：{sorted(b_line)}")
+st.markdown(f"- 漁夫の利ライン（C）：{sorted(c_line)}")
+
+# 表示
+st.markdown("### 🎯 フォーメーション構成")
+for reason in selection_reason_flat:
+    st.markdown(f"- {reason}")
+for i, kumi in enumerate(final_candidates, 1):
+    st.markdown(f"{i}. **{kumi[0]} - {kumi[1]} - {kumi[2]}**")
+
 
 # --- B回数列の統一 ---
 df.rename(columns={"バック": "B回数"}, inplace=True)
