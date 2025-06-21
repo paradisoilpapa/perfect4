@@ -228,6 +228,8 @@ def build_line_position_map():
     return result
 
 # --- スコア計算 ---
+st.subheader("▼ スコア計算")
+if st.button("スコア計算実行"):
     
     def extract_car_list(input_data):
         if isinstance(input_data, str):
@@ -433,10 +435,6 @@ def get_group_bonus(car_no, line_def, bonus_map):
     return 0.0
 
 
-st.subheader("▼ スコア計算")
-if st.button("スコア計算実行"):
-    # --- 関数定義（略） ---
-    # def extract_car_list(...), def score_from_tenscore_list(...), etc.
 
     # --- スコア計算本体を内側へ ---
     tenscore_score = score_from_tenscore_list(rating)
