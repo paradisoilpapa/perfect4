@@ -235,105 +235,100 @@ line_def = {line_names[i]: lines[i] for i in range(len(lines))}
 # --- スコア計算 ---
 
     
-    def extract_car_list(input_data):
-        if isinstance(input_data, str):
-            return [int(c) for c in input_data if c.isdigit()]
-        elif isinstance(input_data, list):
-            return [int(c) for c in input_data if isinstance(c, (str, int)) and str(c).isdigit()]
+def extract_car_list(input_data):
+    if isinstance(input_data, str):
+        return [int(c) for c in input_data if c.isdigit()]
+    elif isinstance(input_data, list):
+        return [int(c) for c in input_data if isinstance(c, (str, int)) and str(c).isdigit()]
+    else:
+        return []
+
+def score_from_tenscore_list(tenscore_list):
+    import pandas as pd
+
+    df = pd.DataFrame({"得点": tenscore_list})
+    df["順位"] = df["得点"].rank(ascending=False, method="min").astype(int)
+
+    # 基準点：2〜6位の平均
+    baseline = df[df["順位"].between(2, 6)]["得点"].mean()
+
+    # 2〜4位だけ補正（差分の3％、必ず正の加点）
+    def apply_targeted_correction(row):
+        if row["順位"] in [2, 3, 4]:
+            correction = abs(baseline - row["得点"]) * 0.03
+            return round(correction, 3)
         else:
-            return []
+            return 0.0
 
-    def score_from_tenscore_list(tenscore_list):
-        import pandas as pd
-    
-        df = pd.DataFrame({"得点": tenscore_list})
-        df["順位"] = df["得点"].rank(ascending=False, method="min").astype(int)
-    
-        # 基準点：2〜6位の平均
-        baseline = df[df["順位"].between(2, 6)]["得点"].mean()
-    
-        # 2〜4位だけ補正（差分の3％、必ず正の加点）
-        def apply_targeted_correction(row):
-            if row["順位"] in [2, 3, 4]:
-                correction = abs(baseline - row["得点"]) * 0.03
-                return round(correction, 3)
-            else:
-                return 0.0
-    
-        df["最終補正値"] = df.apply(apply_targeted_correction, axis=1)
-        return df["最終補正値"].tolist()
+    df["最終補正値"] = df.apply(apply_targeted_correction, axis=1)
+    return df["最終補正値"].tolist()
 
-    def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
-        if direction == "無風" or speed < 0.5:
-            return 0
-    
-        base = wind_coefficients.get(direction, 0.0)  # e.g. 上=+0.10
-        pos_mult = position_multipliers.get(pos, 0.0)  # e.g. 先頭=1.0, 番手=0.6
-    
-        # 強化された脚質補正係数（±1.0スケールに）
-        kaku_coeff = {
-            '逃': +1.0,
-            '両':  0.5,
-            '追': -1.0
-        }.get(kaku, 0.0)
-    
-        total = base * speed * pos_mult * kaku_coeff  # 例: +0.1×10×1×1 = +1.0
-        return round(total, 2)
+def wind_straight_combo_adjust(kaku, direction, speed, straight, pos):
+    if direction == "無風" or speed < 0.5:
+        return 0
 
+    base = wind_coefficients.get(direction, 0.0)  # e.g. 上=+0.10
+    pos_mult = position_multipliers.get(pos, 0.0)  # e.g. 先頭=1.0, 番手=0.6
 
-    def convert_chaku_to_score(values):
-        scores = []
-        for i, v in enumerate(values):  # i=0: 前走, i=1: 前々走
-            v = v.strip()
-            try:
-                chaku = int(v)
-                if 1 <= chaku <= 9:
-                    score = (10 - chaku) / 9
-                    if i == 1:  # 前々走のみ補正
-                        score *= 0.7
-                    scores.append(score)
-            except ValueError:
-                continue
-        if not scores:
-            return None
-        return round(sum(scores) / len(scores), 2)
+    kaku_coeff = {
+        '逃': +1.0,
+        '両':  0.5,
+        '追': -1.0
+    }.get(kaku, 0.0)
 
+    total = base * speed * pos_mult * kaku_coeff
+    return round(total, 2)
 
+def convert_chaku_to_score(values):
+    scores = []
+    for i, v in enumerate(values):  # i=0: 前走, i=1: 前々走
+        v = v.strip()
+        try:
+            chaku = int(v)
+            if 1 <= chaku <= 9:
+                score = (10 - chaku) / 9
+                if i == 1:  # 前々走のみ補正
+                    score *= 0.7
+                scores.append(score)
+        except ValueError:
+            continue
+    if not scores:
+        return None
+    return round(sum(scores) / len(scores), 2)
 
-    def lap_adjust(kaku, laps):
-        delta = max(laps - 4, 0)
-        return {
-            '逃': round(-0.2 * delta, 2),
-            '追': round(+0.1 * delta, 2),
-            '両': 0.0
-        }.get(kaku, 0.0)
+def lap_adjust(kaku, laps):
+    delta = max(laps - 4, 0)
+    return {
+        '逃': round(-0.2 * delta, 2),
+        '追': round(+0.1 * delta, 2),
+        '両': 0.0
+    }.get(kaku, 0.0)
 
-    def line_member_bonus(pos):
-        return {
-            0: 0.5,  # 単騎
-            1: 0.5,  # 先頭（ライン1番手）
-            2: 0.6,  # 2番手（番手）
-            3: 0.4,  # 3番手（最後尾）
-            4: 0.3   # 4番手（9車用：評価不要レベル）
-        }.get(pos, 0.0)
+def line_member_bonus(pos):
+    return {
+        0: 0.5,  # 単騎
+        1: 0.5,  # 先頭（ライン1番手）
+        2: 0.6,  # 2番手（番手）
+        3: 0.4,  # 3番手（最後尾）
+        4: 0.3   # 4番手（9車用：評価不要レベル）
+    }.get(pos, 0.0)
 
+def bank_character_bonus(kaku, angle, straight):
+    """
+    カント角と直線長による脚質補正（スケール緩和済み）
+    """
+    straight_factor = (straight - 40.0) / 10.0
+    angle_factor = (angle - 25.0) / 5.0
+    total_factor = -0.2 * straight_factor + 0.2 * angle_factor
+    return round({'逃': +total_factor, '追': -total_factor, '両': +0.5 * total_factor}.get(kaku, 0.0), 2)
 
-    def bank_character_bonus(kaku, angle, straight):
-        """
-        カント角と直線長による脚質補正（スケール緩和済み）
-        """
-        straight_factor = (straight - 40.0) / 10.0
-        angle_factor = (angle - 25.0) / 5.0
-        total_factor = -0.2 * straight_factor + 0.2 * angle_factor
-        return round({'逃': +total_factor, '追': -total_factor, '両': +0.5 * total_factor}.get(kaku, 0.0), 2)
-        
-    def bank_length_adjust(kaku, length):
-        """
-        バンク周長による補正（400基準を完全維持しつつ、±0.15に制限）
-        """
-        delta = (length - 411) / 100
-        delta = max(min(delta, 0.075), -0.075)
-        return round({'逃': 2.0 * delta, '両': 4.0 * delta, '追': 6.0 * delta}.get(kaku, 0.0), 2)
+def bank_length_adjust(kaku, length):
+    """
+    バンク周長による補正（400基準を完全維持しつつ、±0.15に制限）
+    """
+    delta = (length - 411) / 100
+    delta = max(min(delta, 0.075), -0.075)
+    return round({'逃': 2.0 * delta, '両': 4.0 * delta, '追': 6.0 * delta}.get(kaku, 0.0), 2)
 
 def compute_group_bonus(score_parts, line_def):
     group_scores = {k: 0.0 for k in line_def.keys()}
