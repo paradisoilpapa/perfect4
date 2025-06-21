@@ -169,7 +169,7 @@ for k, val in kakushitsu_inputs.items():
 
 st.subheader("▼ 前々走・前走の着順入力（1〜9着 または 0＝落車）")
 
-# 7選手 × 2走分
+# 9選手 × 2走分
 chaku_inputs = []  # [[前々走, 前走], ..., [前々走, 前走]]
 
 for i in range(9):
@@ -198,34 +198,39 @@ for i in range(9):
     b_val = st.number_input("B回数", min_value=0, max_value=99, value=0, step=1, key=f"b_point_{i+1}")
 
 
-# --- ライン構成入力（最97ライン、単騎含む自由構成） ---
-st.subheader("▼ ライン構成入力（最大9ライン：単騎も1ラインとして扱う）")
+# --- ライン構成入力（最大9ライン） ---
+st.subheader("▼ ライン構成入力（最大9ライン：単騎も含む）")
 
-line_1 = st.text_input("ライン1（例：4）", key="line_1", max_chars=9)
-line_2 = st.text_input("ライン2（例：12）", key="line_2", max_chars=9)
-line_3 = st.text_input("ライン3（例：35）", key="line_3", max_chars=9)
-line_4 = st.text_input("ライン4（例：7）", key="line_4", max_chars=9)
-line_5 = st.text_input("ライン5（例：6）", key="line_5", max_chars=9)
-line_6 = st.text_input("ライン6（任意）", key="line_6", max_chars=9)
-line_7 = st.text_input("ライン7（任意）", key="line_7", max_chars=9)
-line_8 = st.text_input("ライン8（任意）", key="line_8", max_chars=9)
-line_9 = st.text_input("ライン9（任意）", key="line_9", max_chars=9)
+# UI入力（例：line_1 ～ line_9）
+line_inputs = []
+for i in range(1, 10):  # 1〜9
+    val = st.text_input(f"ライン{i}（例：123）", key=f"line_{i}", max_chars=9)
+    if val.strip():
+        line_inputs.append(val)
 
-
-# --- ライン構成入力に必要な補助関数 ---
+# --- ライン構成（リスト化） ---
 def extract_car_list(input_str):
     return [int(c) for c in input_str if c.isdigit()]
 
-def build_line_position_map():
-    result = {}
-    for line, name in zip([a_line, b_line, c_line, d_line, solo_line], ['A', 'B', 'C', 'D', 'S']):
-        cars = extract_car_list(line)
-        for i, car in enumerate(cars):
-            if name == 'S':
-                result[car] = 0
-            else:
-                result[car] = i + 1
-    return result
+lines = [extract_car_list(x) for x in line_inputs if x.strip()]
+
+# --- 各車番のライン順を取得（1〜9番車） ---
+def build_line_position_map(lines):
+    line_order_map = {}
+    for idx, line in enumerate(lines):
+        for car in line:
+            line_order_map[car] = idx + 1
+    return line_order_map
+
+line_order_map = build_line_position_map(lines)
+line_order = [line_order_map.get(i + 1, 0) for i in range(9)]  # 0 = 単騎/所属なし扱い
+
+# --- ライン名付与（A, B, C, ... H, I） ---
+line_names = [chr(ord("A") + i) for i in range(len(lines))]  # ["A", "B", ..., "I"]
+
+# --- line_def（グループ分け辞書）を構成 ---
+line_def = {line_names[i]: lines[i] for i in range(len(lines))}
+
 
 # --- スコア計算 ---
 
