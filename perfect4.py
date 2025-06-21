@@ -198,8 +198,8 @@ for i in range(9):
     b_val = st.number_input("B回数", min_value=0, max_value=99, value=0, step=1, key=f"b_point_{i+1}")
 
 
-# --- ライン構成入力（最大7ライン、単騎含む自由構成） ---
-st.subheader("▼ ライン構成入力（最大7ライン：単騎も1ラインとして扱う）")
+# --- ライン構成入力（最97ライン、単騎含む自由構成） ---
+st.subheader("▼ ライン構成入力（最大9ライン：単騎も1ラインとして扱う）")
 
 line_1 = st.text_input("ライン1（例：4）", key="line_1", max_chars=9)
 line_2 = st.text_input("ライン2（例：12）", key="line_2", max_chars=9)
@@ -208,8 +208,8 @@ line_4 = st.text_input("ライン4（例：7）", key="line_4", max_chars=9)
 line_5 = st.text_input("ライン5（例：6）", key="line_5", max_chars=9)
 line_6 = st.text_input("ライン6（任意）", key="line_6", max_chars=9)
 line_7 = st.text_input("ライン7（任意）", key="line_7", max_chars=9)
-line_8 = st.text_input("ライン6（任意）", key="line_6", max_chars=9)
-line_9 = st.text_input("ライン7（任意）", key="line_7", max_chars=9)
+line_8 = st.text_input("ライン8（任意）", key="line_6", max_chars=9)
+line_9 = st.text_input("ライン9（任意）", key="line_7", max_chars=9)
 
 
 # --- ライン構成入力に必要な補助関数 ---
