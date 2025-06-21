@@ -465,19 +465,26 @@ if st.button("スコア計算実行"):
             rain_corr, symbol_score, line_bonus, bank_bonus, length_bonus, total
         ])
 
-    group_bonus_map = compute_group_bonus(score_parts, line_def)
-    final_score_parts = []
-    for row in score_parts:
-        group_corr = get_group_bonus(row[0], line_def, group_bonus_map)
-        new_total = row[-1] + group_corr
-        final_score_parts.append(row[:-1] + [group_corr, new_total])
+group_bonus_map = compute_group_bonus(score_parts, line_def)
 
-    df = pd.DataFrame(final_score_parts, columns=[
-        '車番', '脚質', '基本', '風補正', '着順補正', '得点補正',
-        '周回補正', 'SB印補正', 'ライン補正', 'バンク補正', '周長補正',
-        'グループ補正', '合計スコア'
-    ])
-    st.dataframe(df.sort_values(by='合計スコア', ascending=False).reset_index(drop=True))
+final_score_parts = []
+for idx, row in enumerate(score_parts):
+    if len(row) != 13:
+        st.error(f"{idx+1}番目のスコア構造に異常あり: {row}")
+        continue
+
+    group_corr = get_group_bonus(row[0], line_def, group_bonus_map) or 0.0
+    new_total = row[-1] + group_corr
+    final_score_parts.append(row[:-1] + [group_corr, new_total])
+
+# 必ず13列＋1（グループ補正）＋1（合計）で15列になる
+df = pd.DataFrame(final_score_parts, columns=[
+    '車番', '脚質', '基本', '風補正', '着順補正', '得点補正',
+    '周回補正', 'SB印補正', 'ライン補正', 'バンク補正', '周長補正',
+    'グループ補正', '合計スコア'
+])
+
+st.dataframe(df.sort_values(by='合計スコア', ascending=False).reset_index(drop=True))
 
     
 try:
