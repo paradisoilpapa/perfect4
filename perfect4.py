@@ -198,13 +198,18 @@ for i in range(9):
     b_val = st.number_input("B回数", min_value=0, max_value=99, value=0, step=1, key=f"b_point_{i+1}")
 
 
-# --- ライン構成入力（A〜Dライン＋単騎） ---
-st.subheader("▼ ライン構成入力（A〜Dライン＋単騎）")
-a_line = st.text_input("Aライン（例：13）", key="a_line", max_chars=9)
-b_line = st.text_input("Bライン（例：25）", key="b_line", max_chars=9)
-c_line = st.text_input("Cライン（例：47）", key="c_line", max_chars=9)
-d_line = st.text_input("Dライン（例：68）", key="d_line", max_chars=9)
-solo_line = st.text_input("単騎枠（例：9）", key="solo_line", max_chars=9)
+# --- ライン構成入力（最大7ライン、単騎含む自由構成） ---
+st.subheader("▼ ライン構成入力（最大7ライン：単騎も1ラインとして扱う）")
+
+line_1 = st.text_input("ライン1（例：4）", key="line_1", max_chars=9)
+line_2 = st.text_input("ライン2（例：12）", key="line_2", max_chars=9)
+line_3 = st.text_input("ライン3（例：35）", key="line_3", max_chars=9)
+line_4 = st.text_input("ライン4（例：7）", key="line_4", max_chars=9)
+line_5 = st.text_input("ライン5（例：6）", key="line_5", max_chars=9)
+line_6 = st.text_input("ライン6（任意）", key="line_6", max_chars=9)
+line_7 = st.text_input("ライン7（任意）", key="line_7", max_chars=9)
+line_8 = st.text_input("ライン6（任意）", key="line_6", max_chars=9)
+line_9 = st.text_input("ライン7（任意）", key="line_7", max_chars=9)
 
 
 # --- ライン構成入力に必要な補助関数 ---
@@ -326,25 +331,30 @@ if st.button("スコア計算実行"):
         delta = max(min(delta, 0.075), -0.075)
         return round({'逃': 2.0 * delta, '両': 4.0 * delta, '追': 6.0 * delta}.get(kaku, 0.0), 2)
 
-    def compute_group_bonus(score_parts, line_def):
-        group_scores = {k: 0.0 for k in ['A', 'B', 'C', 'D']}
-        group_counts = {k: 0 for k in ['A', 'B', 'C', 'D']}
+def compute_group_bonus(score_parts, line_def):
+    group_scores = {k: 0.0 for k in line_def.keys()}
+    group_counts = {k: 0 for k in line_def.keys()}
 
-            # 各ラインの合計スコアと人数を集計
-        for entry in score_parts:
-            car_no, score = entry[0], entry[-1]
-            for group in ['A', 'B', 'C', 'D']:
-                if car_no in line_def[group]:
-                    group_scores[group] += score
-                    group_counts[group] += 1
-                    break
-        # 合計スコアで順位を決定（平均ではない）
-        sorted_lines = sorted(group_scores.items(), key=lambda x: x[1], reverse=True)
-    
-        # 上位グループから順に 0.5 → 0.4 → 0.3→0.2 のボーナスを付与
-        bonus_map = {group: [0.5, 0.4, 0.3, 0.2][idx] for idx, (group, _) in enumerate(sorted_lines)}
-    
-        return bonus_map
+    # 各ラインの合計スコアと人数を集計
+    for entry in score_parts:
+        car_no, score = entry[0], entry[-1]
+        for group in line_def:
+            if car_no in line_def[group]:
+                group_scores[group] += score
+                group_counts[group] += 1
+                break
+
+    # 合計スコアで順位を決定（平均ではなく合計）
+    sorted_lines = sorted(group_scores.items(), key=lambda x: x[1], reverse=True)
+
+    # 順位に応じてボーナス値を割当
+    bonus_map = {
+        group: [0.25, 0.2, 0.15, 0.1, 0.05, 0.03, 0.01, 0.01, 0.01][idx]
+        for idx, (group, _) in enumerate(sorted_lines)
+        if idx < 9
+    }
+
+    return bonus_map
 
 
     def get_group_bonus(car_no, line_def, group_bonus_map):
@@ -357,17 +367,72 @@ if st.button("スコア計算実行"):
             return 0.3
         return 0.0
 
- # ライン構成取得
-    line_def = {
-        'A': extract_car_list(a_line),
-        'B': extract_car_list(b_line),
-        'C': extract_car_list(c_line),
-        'D': extract_car_list(c_line),
-        '単騎': extract_car_list(solo_line)  # tanki → solo_line に合わせて
-        }
+# --- ライン構成取得（最大9ライン。単騎含む。自由入力） ---
+lines = []
+for i in range(1, 8):
+    input_value = st.session_state.get(f"line_{i}", "")
+    if input_value.strip():
+        lines.append(extract_car_list(input_value))
 
-    line_order_map = build_line_position_map()
-    line_order = [line_order_map.get(i + 1, 0) for i in range(9)]
+# --- 各車番のライン順を取得（1〜9番車） ---
+def build_line_position_map(lines):
+    line_order_map = {}
+    for idx, line in enumerate(lines):
+        for car in line:
+            line_order_map[car] = idx + 1
+    return line_order_map
+
+line_order_map = build_line_position_map(lines)
+line_order = [line_order_map.get(i + 1, 0) for i in range(9)]
+
+def score_from_tenscore_list(tenscore_list):
+    import pandas as pd
+
+    df = pd.DataFrame({"得点": tenscore_list})
+    df["順位"] = df["得点"].rank(ascending=False, method="min").astype(int)
+
+    # 基準点：2〜6位の平均
+    baseline = df[df["順位"].between(2, 6)]["得点"].mean()
+
+    # 2〜4位だけ補正（差分の3％、必ず正の加点）
+    def apply_targeted_correction(row):
+        if row["順位"] in [2, 3, 4]:
+            correction = abs(baseline - row["得点"]) * 0.03
+            return round(correction, 3)
+        else:
+            return 0.0
+
+    df["最終補正値"] = df.apply(apply_targeted_correction, axis=1)
+    return df["最終補正値"].tolist()
+
+# --- グループ補正関数（line_defに基づきボーナスマップを作成） ---
+def compute_group_bonus(score_parts, line_def):
+    group_scores = {k: 0.0 for k in line_def.keys()}
+    group_counts = {k: 0 for k in line_def.keys()}
+
+    for entry in score_parts:
+        car_no, score = entry[0], entry[-1]
+        for group in line_def:
+            if car_no in line_def[group]:
+                group_scores[group] += score
+                group_counts[group] += 1
+                break
+
+    sorted_lines = sorted(group_scores.items(), key=lambda x: x[1], reverse=True)
+    bonus_values = [0.25, 0.2, 0.15, 0.1, 0.05, 0.03, 0.01]
+    bonus_map = {
+        group: bonus_values[idx] if idx < len(bonus_values) else 0.0
+        for idx, (group, _) in enumerate(sorted_lines)
+    }
+
+    return bonus_map
+
+# ✅ 追加：車番に対するグループ補正値の取得関数
+def get_group_bonus(car_no, line_def, bonus_map):
+    for group, members in line_def.items():
+        if car_no in members:
+            return bonus_map.get(group, 0.0)
+    return 0.0
 
 
     # スコア計算
@@ -436,124 +501,105 @@ except NameError:
     
 
 from itertools import combinations
+# --- 必要モジュールのインポート ---
 import pandas as pd
 import streamlit as st
 
-# --- B回数列の統一 ---
+# --- B回数列の統一（バック → B回数）---
 df.rename(columns={"バック": "B回数"}, inplace=True)
+
+# --- ユーザー入力されたB回数（バック回数）をdfへ格納 ---
 b_list = [st.session_state.get(f"b_point_{i+1}", 0) for i in range(len(df))]
+
+# --- 再発防止のチェック ---
 if len(b_list) != len(df):
-    st.error("⚠ B回数の数が選手数と一致していません")
+    st.error(f"⚠ B回数の入力数と選手数が一致していません")
     st.stop()
+
+# --- B回数をdfに格納 ---
 df["B回数"] = b_list
 
-# --- ライン構成取得（UI入力を優先） ---
-a_line = extract_car_list(a_line)
-b_line = extract_car_list(b_line)
-c_line = extract_car_list(c_line)
-d_line = extract_car_list(d_line)
-solo_line = extract_car_list(solo_line)
+# --- 競争得点（ratingリスト）と車番をDataFrameに変換 ---
+score_df = pd.DataFrame({
+    "車番": list(range(1, 8)),
+    "得点": rating
+})
 
-line_def_raw = {
-    'A': a_line,
-    'B': b_line,
-    'C': c_line,
-    'D': d_line,
-    '単騎': solo_line
-}
+# --- 得点順で2〜4位を抽出 ---
+subset = score_df.sort_values(by="得点", ascending=False).iloc[1:4]
+target_car_numbers = subset["車番"].tolist()
 
-# 単騎が複数ある場合は個別化
-line_def = {k: v for k, v in line_def_raw.items() if k != '単騎'}
-solo_members = line_def_raw.get('単騎', [])
-for i, solo_car in enumerate(solo_members):
-    line_def[f'単騎{i+1}'] = [solo_car]
+# --- 該当車番のスコア情報を抽出 ---
+subset_scores = [row for row in final_score_parts if row[0] in target_car_numbers]
 
-# --- ◎決定（Aラインから選出） ---
-a_df = df[df["車番"].isin(a_line)].copy()
-a_df_sorted = a_df.sort_values(by="合計スコア", ascending=False)
-anchor = int(a_df_sorted.iloc[0]["車番"])
+# --- スコア順で並べて中央（2番目）を◎に ---
+subset_scores_sorted = sorted(subset_scores, key=lambda x: x[-1], reverse=True)
+anchor_car = subset_scores_sorted[1][0]  # ◎決定（得点2〜4位内でスコア中位）
 
-# --- 三連複構成抽出 ---
-kumi_awase = {"構成①": [], "構成②": [], "構成③": []}
-selection_reason = {"構成①": [], "構成②": [], "構成③": []}
+# --- ◎の所属ラインを本命ライン（A）として定義 ---
+anchor_line_idx = next(i for i, line in enumerate(lines) if anchor_car in line)
+line_roles = {i: "C" for i in range(len(lines))}  # 初期化：すべて漁夫
+line_roles[anchor_line_idx] = "A"  # 本命ラインを設定
 
-# 構成①：◎–A–Cグループ（A残り1＋Cグループ1）
-c_group = c_line + d_line + solo_members
-a_line_filtered = [a for a in a_line if a != anchor]
-if len(a_line_filtered) >= 1 and len(c_group) >= 1:
-    a_df = df[df["車番"].isin(a_line_filtered)].copy()
-    a_df["構成評価"] = (
-        a_df["着順補正"] * 0.8 +
-        a_df["SB印補正"] * 1.2 +
-        a_df["ライン補正"] * 0.4 +
-        a_df["グループ補正"] * 0.2
-    )
-    a_sorted = list(a_df.sort_values(by="構成評価", ascending=False)["車番"])
+# --- Bライン候補：得点順1〜4位のうち◎以外の所属ライン ---
+b_candidates = score_df.sort_values(by="得点", ascending=False).iloc[:4]
+b_candidates = b_candidates[b_candidates["車番"] != anchor_car]
+b_line_scores = []
 
-    c_df = df[df["車番"].isin(c_group)].copy()
-    c_df["構成評価"] = (
-        c_df["着順補正"] * 0.8 +
-        c_df["SB印補正"] * 1.2 +
-        c_df["ライン補正"] * 0.4 +
-        c_df["グループ補正"] * 0.2
-    )
-    c_sorted = list(c_df.sort_values(by="構成評価", ascending=False)["車番"])
+for i, line in enumerate(lines):
+    if i == anchor_line_idx:
+        continue
+    line_score = b_candidates[b_candidates["車番"].isin(line)]["得点"].sum()
+    if line_score > 0:
+        b_line_scores.append((i, line_score))
 
-    for a in a_sorted:
-        for c in c_sorted:
-            kumi = tuple(sorted([anchor, a, c]))
-            if kumi not in kumi_awase["構成①"]:
-                kumi_awase["構成①"].append(kumi)
-                selection_reason["構成①"].append(f"◎({anchor})–A({a})–C({c})")
+if b_line_scores:
+    b_line_idx = max(b_line_scores, key=lambda x: x[1])[0]
+    line_roles[b_line_idx] = "B"
 
-# 構成②：対抗ラインスコア上位2–◎
-if len(b_line) >= 2:
-    b_df = df[df["車番"].isin(b_line)].copy()
-    b_df["構成評価"] = (
-        b_df["着順補正"] * 0.8 +
-        b_df["SB印補正"] * 1.2 +
-        b_df["ライン補正"] * 0.4 +
-        b_df["グループ補正"] * 0.2
-    )
-    b_sorted = list(b_df.sort_values(by="構成評価", ascending=False)["車番"][:3])
-    for b1, b2 in combinations(b_sorted, 2):
-        kumi = tuple(sorted([anchor, b1, b2]))
-        if kumi not in kumi_awase["構成②"]:
-            kumi_awase["構成②"].append(kumi)
-            selection_reason["構成②"].append(f"B({b1},{b2})–◎({anchor})")
+# --- 各役割ラインの車番抽出 ---
+a_line = lines[anchor_line_idx]
+b_cars = [car for idx, role in line_roles.items() if role == "B" for car in lines[idx]]
+c_cars = [car for idx, role in line_roles.items() if role == "C" for car in lines[idx]]
 
-# 構成③：◎–A上位2–Aライン残り全てとの組合せ（2名分）
-if len(a_line_filtered) >= 3:
-    a_df = df[df["車番"].isin(a_line_filtered)].copy()
-    a_df["構成評価"] = (
-        a_df["着順補正"] * 0.8 +
-        a_df["SB印補正"] * 1.2 +
-        a_df["ライン補正"] * 0.4 +
-        a_df["グループ補正"] * 0.2
-    )
-    a_sorted = list(a_df.sort_values(by="構成評価", ascending=False)["車番"])
-    top2 = a_sorted[:2]
-    remaining = [a for a in a_sorted if a not in top2]
-    for a1 in top2:
-        for rem in remaining:
-            kumi = tuple(sorted([anchor, a1, rem]))
-            if kumi not in kumi_awase["構成③"]:
-                kumi_awase["構成③"].append(kumi)
-                selection_reason["構成③"].append(f"◎({anchor})–A上位({a1})–A残り({rem})")
+# --- anchorライン内でスコア順ソート ---
+anchor_score_sorted = sorted(
+    [row for row in final_score_parts if row[0] in a_line],
+    key=lambda x: x[-1],
+    reverse=True
+)
+anchor_others = [row[0] for row in anchor_score_sorted if row[0] != anchor_car]
 
-# --- 最終出力 ---
-final_candidates = kumi_awase["構成①"] + kumi_awase["構成②"] + kumi_awase["構成③"]
-selection_reason_flat = selection_reason["構成①"] + selection_reason["構成②"] + selection_reason["構成③"]
+# --- パターン①（◎-◎ライン-漁夫）構成 ---
+pattern_1 = [
+    tuple(sorted([anchor_car, x, y]))
+    for x in anchor_others
+    for y in c_cars
+    if len(set([anchor_car, x, y])) == 3
+]
 
-# ライン表示まとめ
-st.markdown("### 🔹 ライン定義")
-st.markdown(f"- 本命ライン（A）：{sorted(a_line)}")
-st.markdown(f"- 対抗ライン（B）：{sorted(b_line)}")
-st.markdown(f"- Cグループ（C以下の統合）：{sorted(c_group)}")
+# anchor（◎）を除いた対抗ラインの車番で構成
+b_only = [car for car in b_cars if car != anchor_car]
 
-# 表示
-st.markdown("### 🎯 フォーメーション構成")
-for reason in selection_reason_flat:
-    st.markdown(f"- {reason}")
-for i, kumi in enumerate(final_candidates, 1):
-    st.markdown(f"{i}. **{kumi[0]} - {kumi[1]} - {kumi[2]}**")
+pattern_2 = [
+    tuple(sorted([x, y, anchor_car]))
+    for i, x in enumerate(b_only)
+    for y in b_only[i+1:]
+]
+
+# --- 重複除去・ソート ---
+pattern_1 = sorted(set(pattern_1))
+pattern_2 = sorted(set(pattern_2))
+
+# --- 表示 ---
+st.markdown("### 🌟 フォーメーション構成")
+st.markdown(f"◆ 本線ライン（◎が所属）: {anchor_car} in {a_line}")
+st.markdown(f"◆ 対抗ライン: {b_cars} ／ 漁夫ライン: {c_cars}")
+
+st.markdown("#### ▶ パターン1：◎-◎ライン-漁夫")
+for p in pattern_1:
+    st.write(f"三連複 {p}")
+
+st.markdown("#### ▶ パターン2：対抗-対抗-◎")
+for p in pattern_2:
+    st.write(f"三連複 {p}")
