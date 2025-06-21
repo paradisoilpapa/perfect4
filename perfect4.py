@@ -208,8 +208,8 @@ line_4 = st.text_input("ライン4（例：7）", key="line_4", max_chars=9)
 line_5 = st.text_input("ライン5（例：6）", key="line_5", max_chars=9)
 line_6 = st.text_input("ライン6（任意）", key="line_6", max_chars=9)
 line_7 = st.text_input("ライン7（任意）", key="line_7", max_chars=9)
-line_8 = st.text_input("ライン8（任意）", key="line_6", max_chars=9)
-line_9 = st.text_input("ライン9（任意）", key="line_7", max_chars=9)
+line_8 = st.text_input("ライン8（任意）", key="line_8", max_chars=9)
+line_9 = st.text_input("ライン9（任意）", key="line_9", max_chars=9)
 
 
 # --- ライン構成入力に必要な補助関数 ---
