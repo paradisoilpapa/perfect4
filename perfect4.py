@@ -227,10 +227,8 @@ def build_line_position_map():
                 result[car] = i + 1
     return result
 
-# --- スコア計算ボタン表示 ---
-st.subheader("▼ スコア計算")
-if st.button("スコア計算実行"):
-
+# --- スコア計算 ---
+    
     def extract_car_list(input_data):
         if isinstance(input_data, str):
             return [int(c) for c in input_data if c.isdigit()]
