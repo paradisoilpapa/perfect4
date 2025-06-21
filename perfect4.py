@@ -384,6 +384,11 @@ def build_line_position_map(lines):
 line_order_map = build_line_position_map(lines)
 line_order = [line_order_map.get(i + 1, 0) for i in range(9)]
 
+# ✅ ここが今回追加すべき部分！
+line_names = [chr(ord("A") + i) for i in range(len(lines))]
+line_def = {line_names[i]: lines[i] for i in range(len(lines))}
+
+
 def score_from_tenscore_list(tenscore_list):
     import pandas as pd
 
