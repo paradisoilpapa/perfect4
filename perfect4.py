@@ -4,7 +4,7 @@ import pandas as pd
 # --- ページ設定 ---
 st.set_page_config(page_title="ライン競輪スコア計算（完全統一版）", layout="wide")
 
-st.title("⭐ ライン競輪スコア計算（7車ライン＋欠番対応）⭐")
+st.title("⭐ ライン競輪スコア計算（9車ライン＋欠番対応）⭐")
 
 # --- 風向補正係数 ---
 wind_coefficients = {
@@ -577,7 +577,6 @@ except NameError:
     st.stop()
     
 
-# --- 必要モジュールのインポート ---
 import pandas as pd
 import streamlit as st
 
@@ -595,9 +594,9 @@ if len(b_list) != len(df):
 # --- B回数をdfに格納 ---
 df["B回数"] = b_list
 
-# --- 競争得点（ratingリスト）と車番をDataFrameに変換 ---
+# --- 競争得点（ratingリスト）と車番をDataFrameに変換（9車用） ---
 score_df = pd.DataFrame({
-    "車番": list(range(1, 8)),
+    "車番": list(range(1, 10)),
     "得点": rating
 })
 
@@ -610,28 +609,33 @@ subset_scores = [row for row in final_score_parts if row[0] in target_car_number
 
 # --- スコア順で並べて中央（2番目）を◎に ---
 subset_scores_sorted = sorted(subset_scores, key=lambda x: x[-1], reverse=True)
-anchor_car = subset_scores_sorted[1][0]  # ◎決定（得点2〜4位内でスコア中位）
+anchor_car = subset_scores_sorted[1][0]  # ◎決定
 
 # --- ◎の所属ラインを本命ライン（A）として定義 ---
 anchor_line_idx = next(i for i, line in enumerate(lines) if anchor_car in line)
-line_roles = {i: "C" for i in range(len(lines))}  # 初期化：すべて漁夫
-line_roles[anchor_line_idx] = "A"  # 本命ラインを設定
+line_roles = {i: "Z" for i in range(len(lines))}  # Z=非対象
+line_roles[anchor_line_idx] = "A"
 
-# --- Bライン候補：得点順1〜4位のうち◎以外の所属ライン ---
-b_candidates = score_df.sort_values(by="得点", ascending=False).iloc[:4]
-b_candidates = b_candidates[b_candidates["車番"] != anchor_car]
-b_line_scores = []
+# --- 得点上位1〜4位を抽出（DataFrameとして残す） ---
+top4_df = score_df.sort_values(by="得点", ascending=False).iloc[:4]
 
+# --- ◎を除いた中で得点が最も高い選手を選出（対抗ラインB） ---
+b_candidates = top4_df[top4_df["車番"] != anchor_car]
+if not b_candidates.empty:
+    top_b_car = b_candidates.iloc[0]["車番"]
+    for i, line in enumerate(lines):
+        if i == anchor_line_idx:
+            continue
+        if top_b_car in line:
+            line_roles[i] = "B"
+            break
+
+# --- 漁夫ライン（C）：得点上位1〜4位に属し、AでもBでもないライン ---
+top4_cars = set(top4_df["車番"])
 for i, line in enumerate(lines):
-    if i == anchor_line_idx:
-        continue
-    line_score = b_candidates[b_candidates["車番"].isin(line)]["得点"].sum()
-    if line_score > 0:
-        b_line_scores.append((i, line_score))
-
-if b_line_scores:
-    b_line_idx = max(b_line_scores, key=lambda x: x[1])[0]
-    line_roles[b_line_idx] = "B"
+    if line_roles[i] == "Z":
+        if any(car in top4_cars for car in line):
+            line_roles[i] = "C"
 
 # --- 各役割ラインの車番抽出 ---
 a_line = lines[anchor_line_idx]
@@ -654,9 +658,8 @@ pattern_1 = [
     if len(set([anchor_car, x, y])) == 3
 ]
 
-# anchor（◎）を除いた対抗ラインの車番で構成
+# --- パターン②（対抗-対抗-◎）構成 ---
 b_only = [car for car in b_cars if car != anchor_car]
-
 pattern_2 = [
     tuple(sorted([x, y, anchor_car]))
     for i, x in enumerate(b_only)
@@ -672,10 +675,10 @@ st.markdown("### 🌟 フォーメーション構成")
 st.markdown(f"◆ 本線ライン（◎が所属）: {anchor_car} in {a_line}")
 st.markdown(f"◆ 対抗ライン: {b_cars} ／ 漁夫ライン: {c_cars}")
 
-st.markdown("#### ▶ パターン1：◎-◎ライン-漁夫")
-for p in pattern_1:
-    st.write(f"三連複 {p}")
+with st.expander("▶ パターン1：◎-◎ライン-漁夫", expanded=True):
+    for p in pattern_1:
+        st.write(f"三連複 {p}")
 
-st.markdown("#### ▶ パターン2：対抗-対抗-◎")
-for p in pattern_2:
-    st.write(f"三連複 {p}")
+with st.expander("▶ パターン2：対抗-対抗-◎", expanded=True):
+    for p in pattern_2:
+        st.write(f"三連複 {p}")
