@@ -594,55 +594,51 @@ if len(b_list) != len(df):
 # --- B回数をdfに格納 ---
 df["B回数"] = b_list
 
-# --- 競争得点（ratingリスト）と車番をDataFrameに変換（9車用） ---
+# --- 得点テーブル構築 ---
 score_df = pd.DataFrame({
     "車番": list(range(1, 10)),
     "得点": rating
 })
 
-# --- 得点順で2〜4位を抽出 ---
+# --- 得点順で2〜4位を抽出し、◎（スコア中位）を選ぶ ---
 subset = score_df.sort_values(by="得点", ascending=False).iloc[1:4]
 target_car_numbers = subset["車番"].tolist()
 
-# --- 該当車番のスコア情報を抽出 ---
 subset_scores = [row for row in final_score_parts if row[0] in target_car_numbers]
-
-# --- スコア順で並べて中央（2番目）を◎に ---
 subset_scores_sorted = sorted(subset_scores, key=lambda x: x[-1], reverse=True)
-anchor_car = subset_scores_sorted[1][0]  # ◎決定
+anchor_car = subset_scores_sorted[1][0]  # ◎
 
-# --- ◎の所属ラインを本命ライン（A）として定義 ---
+# --- ライン役割初期化 ---
 anchor_line_idx = next(i for i, line in enumerate(lines) if anchor_car in line)
-line_roles = {i: "Z" for i in range(len(lines))}  # Z=非対象
+line_roles = {i: "Z" for i in range(len(lines))}
 line_roles[anchor_line_idx] = "A"
 
-# --- 得点上位1〜4位を抽出（DataFrameとして残す） ---
+# --- 得点上位1〜4位から◎を除いた中で最高得点者を取得 ---
 top4_df = score_df.sort_values(by="得点", ascending=False).iloc[:4]
-
-# --- ◎を除いた中で得点が最も高い選手を選出（対抗ラインB） ---
 b_candidates = top4_df[top4_df["車番"] != anchor_car]
+
 if not b_candidates.empty:
     top_b_car = b_candidates.iloc[0]["車番"]
     for i, line in enumerate(lines):
-        if i == anchor_line_idx:
-            continue
         if top_b_car in line:
-            line_roles[i] = "B"
+            # 既にAになっていればそのまま、それ以外はBに指定
+            if line_roles[i] != "A":
+                line_roles[i] = "B"
             break
 
-# --- 漁夫ライン（C）：得点上位1〜4位に属し、AでもBでもないライン ---
+# --- 漁夫ライン（C）を定義（得点上位1〜4位のうち、A・B以外のライン） ---
 top4_cars = set(top4_df["車番"])
 for i, line in enumerate(lines):
     if line_roles[i] == "Z":
         if any(car in top4_cars for car in line):
             line_roles[i] = "C"
 
-# --- 各役割ラインの車番抽出 ---
+# --- 各ラインの所属車番 ---
 a_line = lines[anchor_line_idx]
 b_cars = [car for idx, role in line_roles.items() if role == "B" for car in lines[idx]]
 c_cars = [car for idx, role in line_roles.items() if role == "C" for car in lines[idx]]
 
-# --- anchorライン内でスコア順ソート ---
+# --- anchorラインから◎以外を抽出し、スコア順で並べる ---
 anchor_score_sorted = sorted(
     [row for row in final_score_parts if row[0] in a_line],
     key=lambda x: x[-1],
@@ -650,7 +646,7 @@ anchor_score_sorted = sorted(
 )
 anchor_others = [row[0] for row in anchor_score_sorted if row[0] != anchor_car]
 
-# --- パターン①（◎-◎ライン-漁夫）構成 ---
+# --- パターン①：◎-◎ライン-漁夫 ---
 pattern_1 = [
     tuple(sorted([anchor_car, x, y]))
     for x in anchor_others
@@ -658,7 +654,7 @@ pattern_1 = [
     if len(set([anchor_car, x, y])) == 3
 ]
 
-# --- パターン②（対抗-対抗-◎）構成 ---
+# --- パターン②：対抗-対抗-◎ ---
 b_only = [car for car in b_cars if car != anchor_car]
 pattern_2 = [
     tuple(sorted([x, y, anchor_car]))
@@ -666,14 +662,14 @@ pattern_2 = [
     for y in b_only[i+1:]
 ]
 
-# --- 重複除去・ソート ---
+# --- 重複排除・ソート ---
 pattern_1 = sorted(set(pattern_1))
 pattern_2 = sorted(set(pattern_2))
 
 # --- 表示 ---
 st.markdown("### 🌟 フォーメーション構成")
 st.markdown(f"◆ 本線ライン（◎が所属）: {anchor_car} in {a_line}")
-st.markdown(f"◆ 対抗ライン: {b_cars} ／ 漁夫ライン: {c_cars}")
+st.markdown(f"◆ 対抗ライン: {b_cars if b_cars else '該当なし'} ／ 漁夫ライン: {c_cars if c_cars else '該当なし'}")
 
 with st.expander("▶ パターン1：◎-◎ライン-漁夫", expanded=True):
     for p in pattern_1:
