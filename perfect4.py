@@ -7,10 +7,10 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ分析（開催日別）", layout="wide")
-st.title("ヴェロビ 組み方分析（7車・開催日別／全場合算） v2.3")
+st.title("ヴェロビ 組み方分析（7車・開催日別／全体集計） v2.4")
 
 # -------- 基本設定 --------
-DAY_OPTIONS = ["初日", "2日目", "3日目", "最終日"]
+DAY_OPTIONS = ["初日", "2日目", "3日目"]  # 最終日を除外
 
 
 def parse_rankline(s: str) -> List[str]:
@@ -107,7 +107,7 @@ with input_tabs[1]:
                 rec["C2"] += int(C2)
                 rec["C3"] += int(C3)
 
-# -------- 集計構築 --------
+# -------- 集計構築（開催日別 + 全体） --------
 rank_counts_daily: Dict[Tuple[str, int], Dict[str, int]] = defaultdict(lambda: {"N":0, "C1":0, "C2":0, "C3":0})
 pair_counts: Dict[Tuple[str, int, int], int] = defaultdict(int)
 trio_counts: Dict[Tuple[str, Tuple[int,int,int]], int] = defaultdict(int)
@@ -155,8 +155,31 @@ for (day, r), rec in agg_counts_manual.items():
     rank_counts_daily[(day, r)]["C2"] += rec["C2"]
     rank_counts_daily[(day, r)]["C3"] += rec["C3"]
 
+# 全体集計の構築
+rank_counts_total: Dict[int, Dict[str, int]] = {r: {"N":0, "C1":0, "C2":0, "C3":0} for r in range(1,8)}
+for (day, r), rec in rank_counts_daily.items():
+    for k in ("N","C1","C2","C3"):
+        rank_counts_total[r][k] += rec[k]
+
+pair_counts_total: Dict[Tuple[int,int], int] = defaultdict(int)
+for (day, i, j), v in pair_counts.items():
+    pair_counts_total[(i, j)] += v
+
+trio_counts_total: Dict[Tuple[int,int,int], int] = defaultdict(int)
+for (day, tri), v in trio_counts.items():
+    trio_counts_total[tri] += v
+
+anchor_totals_total: Dict[int, int] = defaultdict(int)
+for (day, i), v in anchor_totals.items():
+    anchor_totals_total[i] += v
+
+anchor_partner_total: Dict[Tuple[int,int], int] = defaultdict(int)
+for (day, i, j), v in anchor_partner.items():
+    anchor_partner_total[(i, j)] += v
+
 # -------- 出力タブ --------
 with input_tabs[2]:
+    # 1) ランク別 入賞テーブル
     st.subheader("開催日別：ランク別 入賞テーブル（1～7）")
     for day in DAY_OPTIONS:
         rows_out = []
@@ -179,7 +202,28 @@ with input_tabs[2]:
         st.markdown(f"### {day}")
         st.dataframe(df_day, use_container_width=True, hide_index=True)
 
+    # 全体
+    rows_total = []
+    for r in range(1, 8):
+        rec = rank_counts_total.get(r, {"N":0,"C1":0,"C2":0,"C3":0})
+        N, C1, C2, C3 = rec["N"], rec["C1"], rec["C2"], rec["C3"]
+        def rate(x, n):
+            return round(100*x/n, 1) if n>0 else None
+        rows_total.append({
+            "ランク": r,
+            "出走数N": N,
+            "1着回数": C1,
+            "2着回数": C2,
+            "3着回数": C3,
+            "1着率%": rate(C1,N),
+            "連対率%": rate(C1+C2,N),
+            "3着内率%": rate(C1+C2+C3,N),
+        })
+    st.markdown("### 全体")
+    st.dataframe(pd.DataFrame(rows_total), use_container_width=True, hide_index=True)
+
     st.divider()
+    # 2) 連対ペア分布
     st.subheader("開催日別：連対ペア分布（{i,j}：順序なし／件数と構成比%）")
     for day in DAY_OPTIONS:
         denom = sum(v for (d, i, j), v in pair_counts.items() if d == day)
@@ -196,7 +240,23 @@ with input_tabs[2]:
         st.markdown(f"**{day}**")
         st.dataframe(df_pairs, use_container_width=True, hide_index=True)
 
+    # 全体
+    denom_all = sum(pair_counts_total.values())
+    st.markdown("**全体**")
+    if denom_all == 0:
+        st.markdown("全体：データ不足")
+    else:
+        pairs_all = []
+        for i in range(1,8):
+            for j in range(i+1,8):
+                cnt = pair_counts_total.get((i, j), 0)
+                if cnt>0:
+                    pairs_all.append({"ペア": f"{{{i},{j}}}", "件数": cnt, "構成比%": round(100*cnt/denom_all,1)})
+        df_pairs_all = pd.DataFrame(pairs_all).sort_values(["件数"], ascending=False)
+        st.dataframe(df_pairs_all, use_container_width=True, hide_index=True)
+
     st.divider()
+    # 3) アンカー別パートナーTop3
     st.subheader("開催日別：アンカー別パートナーTop3（P(相手|アンカー)）")
     for day in DAY_OPTIONS:
         blocks = []
@@ -228,7 +288,38 @@ with input_tabs[2]:
         else:
             st.markdown(f"**{day}**：データ不足")
 
+    # 全体
+    blocks_all = []
+    for i in range(1,8):
+        total = anchor_totals_total.get(i, 0)
+        if total == 0:
+            continue
+        partners = []
+        for j in range(1,8):
+            if j == i:
+                continue
+            cnt = anchor_partner_total.get((i, j), 0)
+            if cnt>0:
+                partners.append((j, cnt/total))
+        partners.sort(key=lambda x: x[1], reverse=True)
+        partners = partners[:3]
+        blocks_all.append({
+            "アンカー": i,
+            "相手1": partners[0][0] if len(partners)>0 else None,
+            "P1%": round(100*partners[0][1],1) if len(partners)>0 else None,
+            "相手2": partners[1][0] if len(partners)>1 else None,
+            "P2%": round(100*partners[1][1],1) if len(partners)>1 else None,
+            "相手3": partners[2][0] if len(partners)>2 else None,
+            "P3%": round(100*partners[2][1],1) if len(partners)>2 else None,
+        })
+    st.markdown("**全体**")
+    if blocks_all:
+        st.dataframe(pd.DataFrame(blocks_all), use_container_width=True, hide_index=True)
+    else:
+        st.markdown("全体：データ不足")
+
     st.divider()
+    # 4) トリオ（上位3集合）
     st.subheader("開催日別：トリオ（上位3集合）のランキング")
     for day in DAY_OPTIONS:
         denom3 = sum(v for (d, tri), v in trio_counts.items() if d == day)
@@ -246,7 +337,24 @@ with input_tabs[2]:
         st.markdown(f"**{day}**")
         st.dataframe(df_tri, use_container_width=True, hide_index=True)
 
+    # 全体
+    denom3_all = sum(trio_counts_total.values())
+    st.markdown("**全体**")
+    if denom3_all == 0:
+        st.markdown("全体：データ不足")
+    else:
+        tri_rows_all = []
+        for i in range(1,6):
+            for j in range(i+1,7):
+                for k in range(j+1,8):
+                    cnt = trio_counts_total.get((i,j,k), 0)
+                    if cnt>0:
+                        tri_rows_all.append({"トリオ": f"{{{i},{j},{k}}}", "件数": cnt, "構成比%": round(100*cnt/denom3_all,1)})
+        df_tri_all = pd.DataFrame(tri_rows_all).sort_values(["件数"], ascending=False)
+        st.dataframe(df_tri_all, use_container_width=True, hide_index=True)
+
     st.divider()
+    # 5) モード指標（高番手/穴）
     st.subheader("開催日別：モード指標（高番手(1–4)/穴(5–7)ペア率）")
     mode_rows = []
     for day in DAY_OPTIONS:
@@ -260,3 +368,15 @@ with input_tabs[2]:
             "分母(ペア)": denom_pairs,
         })
     st.dataframe(pd.DataFrame(mode_rows), use_container_width=True, hide_index=True)
+
+    # 全体
+    denom_pairs_all = sum(pair_counts_total.values())
+    high_all = sum(v for (i, j), v in pair_counts_total.items() if i <= 4 and j <= 4)
+    hole_all = sum(v for (i, j), v in pair_counts_total.items() if (i >= 5 or j >= 5))
+    mode_total = pd.DataFrame([{
+        "集計": "全体",
+        "高番手(1–4)ペア率%": round(100*high_all/denom_pairs_all,1) if denom_pairs_all>0 else None,
+        "穴(5–7)絡み率%": round(100*hole_all/denom_pairs_all,1) if denom_pairs_all>0 else None,
+        "分母(ペア)": denom_pairs_all,
+    }])
+    st.dataframe(mode_total, use_container_width=True, hide_index=True)
