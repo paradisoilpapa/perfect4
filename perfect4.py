@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ分析（開催日別）", layout="wide")
-st.title("ヴェロビ 組み方分析（7車・開催日別／全場合算） v2.2")
+st.title("ヴェロビ 組み方分析（7車・開催日別／全場合算） v2.3")
 
 # -------- 基本設定 --------
 DAY_OPTIONS = ["初日", "2日目", "3日目", "最終日"]
@@ -40,58 +40,46 @@ def parse_finish(s: str) -> List[str]:
     return out
 
 
-def parse_lineup(s: str) -> List[List[str]]:
-    if not s:
-        return []
-    s = s.replace(" ", "")
-    blocks = [list(filter(lambda x: x in "1234567", list(b))) for b in s.split("|")]
-    return [b for b in blocks if b]
-
-
 # -------- 入力タブ --------
 input_tabs = st.tabs(["日次手入力（最大12R）", "前日までの集計（ランク別回数）", "分析結果"])
 
 byrace_rows: List[Dict] = []
 agg_counts_manual: Dict[Tuple[str, int], Dict[str, int]] = defaultdict(lambda: {"N": 0, "C1": 0, "C2": 0, "C3": 0})
 
-# A. 日次手入力
+# A. 日次手入力（開催日は1回だけ指定→全行に適用）
 with input_tabs[0]:
     st.subheader("日次手入力（開催日別・最大12R）")
 
-    cols_hdr = st.columns([1,1.2,1,2,1.2,2])
+    day_global = st.selectbox("開催日（この選択を全レースに適用）", DAY_OPTIONS, key="global_day")
+
+    cols_hdr = st.columns([1,1,2,1.5])
     cols_hdr[0].markdown("**R**")
-    cols_hdr[1].markdown("**開催日**")
-    cols_hdr[2].markdown("**頭数**")
-    cols_hdr[3].markdown("**V順位(14...)**")
-    cols_hdr[4].markdown("**着順(～3桁)**")
-    cols_hdr[5].markdown("**隊列(任意)**")
+    cols_hdr[1].markdown("**頭数**")
+    cols_hdr[2].markdown("**V順位(14...)**")
+    cols_hdr[3].markdown("**着順(～3桁)**")
 
     for i in range(1, 13):
-        c1, c2, c3, c4, c5, c6 = st.columns([1,1.2,1,2,1.2,2])
+        c1, c2, c3, c4 = st.columns([1,1,2,1.5])
         rid = c1.text_input("", key=f"rid_{i}", value=str(i))
-        day = c2.selectbox("", DAY_OPTIONS + [""], index=len(DAY_OPTIONS), key=f"day_{i}")
-        field = c3.number_input("", min_value=4, max_value=7, value=7, key=f"field_{i}")
-        vline = c4.text_input("", key=f"vline_{i}", value="")
-        fin = c5.text_input("", key=f"fin_{i}", value="")
-        lineup = c6.text_input("", key=f"line_{i}", value="")
+        field = c2.number_input("", min_value=4, max_value=7, value=7, key=f"field_{i}")
+        vline = c3.text_input("", key=f"vline_{i}", value="")
+        fin = c4.text_input("", key=f"fin_{i}", value="")
 
         vorder = parse_rankline(vline)
         finish = parse_finish(fin)
-        blocks = parse_lineup(lineup)
 
-        any_input = any([day, vorder, finish, blocks])
+        any_input = any([vorder, finish])
         if any_input:
-            if day and vorder and (4 <= field <= 7) and len(vorder) <= field:
+            if vorder and (4 <= field <= 7) and len(vorder) <= field:
                 byrace_rows.append({
-                    "day": day,
+                    "day": day_global,
                     "race": rid,
                     "field": field,
                     "vorder": vorder,
                     "finish": finish,
-                    "lineup": blocks,
                 })
             else:
-                st.warning(f"R{rid}: 入力不整合（開催日/V順位/頭数を確認）。V順位は頭数桁以下、4～7車のみ対象。")
+                st.warning(f"R{rid}: 入力不整合（V順位/頭数を確認）。V順位は頭数桁以下、4～7車のみ対象。")
 
 # B. 前日までの集計（手入力）
 with input_tabs[1]:
@@ -125,8 +113,6 @@ pair_counts: Dict[Tuple[str, int, int], int] = defaultdict(int)
 trio_counts: Dict[Tuple[str, Tuple[int,int,int]], int] = defaultdict(int)
 anchor_totals: Dict[Tuple[str, int], int] = defaultdict(int)
 anchor_partner: Dict[Tuple[str, int, int], int] = defaultdict(int)
-line_oneblock_total: Dict[str, int] = defaultdict(int)
-line_oneline_count: Dict[str, int] = defaultdict(int)
 
 for row in byrace_rows:
     day = row["day"]
@@ -162,12 +148,6 @@ for row in byrace_rows:
         j = rank_by_car[finish[1]]
         k = rank_by_car[finish[2]]
         trio_counts[(day, tuple(sorted((i, j, k))))] += 1
-
-    blocks = row.get("lineup", [])
-    if blocks:
-        line_oneblock_total[day] += 1
-        if len(blocks) == 1:
-            line_oneline_count[day] += 1
 
 for (day, r), rec in agg_counts_manual.items():
     rank_counts_daily[(day, r)]["N"] += rec["N"]
@@ -267,20 +247,16 @@ with input_tabs[2]:
         st.dataframe(df_tri, use_container_width=True, hide_index=True)
 
     st.divider()
-    st.subheader("開催日別：モード指標（高番手/穴ペア率・一列棒状率）")
+    st.subheader("開催日別：モード指標（高番手(1–4)/穴(5–7)ペア率）")
     mode_rows = []
     for day in DAY_OPTIONS:
         denom_pairs = sum(v for (d, i, j), v in pair_counts.items() if d == day)
-        high = sum(pair_counts.get((day, i, j), 0) for (i, j) in [(1,2),(1,3),(2,3)])
-        hole = sum(v for (d, i, j), v in pair_counts.items() if d==day and ((i>=5) or (j>=5)))
-        denom_line = line_oneblock_total.get(day, 0)
-        one_line = line_oneline_count.get(day, 0)
+        high = sum(v for (d, i, j), v in pair_counts.items() if d == day and i <= 4 and j <= 4)
+        hole = sum(v for (d, i, j), v in pair_counts.items() if d == day and (i >= 5 or j >= 5))
         mode_rows.append({
             "開催日": day,
-            "高番手ペア率%": round(100*high/denom_pairs,1) if denom_pairs>0 else None,
-            "穴寄りペア率%": round(100*hole/denom_pairs,1) if denom_pairs>0 else None,
-            "一列棒状率%": round(100*one_line/denom_line,1) if denom_line>0 else None,
+            "高番手(1–4)ペア率%": round(100*high/denom_pairs,1) if denom_pairs>0 else None,
+            "穴(5–7)絡み率%": round(100*hole/denom_pairs,1) if denom_pairs>0 else None,
             "分母(ペア)": denom_pairs,
-            "分母(隊列)": denom_line,
         })
     st.dataframe(pd.DataFrame(mode_rows), use_container_width=True, hide_index=True)
