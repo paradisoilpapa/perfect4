@@ -6,12 +6,12 @@ from typing import List, Dict, Tuple
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="ヴェロビ分析（開催日別）", layout="wide")
-st.title("ヴェロビ 組み方分析（7車・開催日別／全体集計） v2.6")
+st.set_page_config(page_title="ヴェロビ分析（開催区分別）", layout="wide")
+st.title("ヴェロビ 組み方分析（7車・開催区分別／全体集計） v2.6")
 
 # -------- 基本設定 --------
-# 開催日名称を「初日・中日・最終日」に統一
-DAY_OPTIONS = ["初日", "中日", "最終日"]
+# 開催区分名称を「F2・F1・G」に統一
+DAY_OPTIONS = ["F2", "F1", "G"]
 
 # ランク表示：1～7 を ◎ 〇 ▲ △ × α β にマッピング（内部計算は数値のまま）
 RANK_SYMBOLS = {1: "◎", 2: "〇", 3: "▲", 4: "△", 5: "×", 6: "α", 7: "β"}
@@ -49,11 +49,11 @@ input_tabs = st.tabs(["日次手入力（最大12R）", "前日までの集計�
 byrace_rows: List[Dict] = []
 agg_counts_manual: Dict[Tuple[str, int], Dict[str, int]] = defaultdict(lambda: {"N": 0, "C1": 0, "C2": 0, "C3": 0})
 
-# A. 日次手入力（開催日は1回だけ指定→全行に適用）
+# A. 日次手入力（開催区分は1回だけ指定→全行に適用）
 with input_tabs[0]:
-    st.subheader("日次手入力（開催日別・最大12R）")
+    st.subheader("日次手入力（開催区分別・最大12R）")
 
-    day_global = st.selectbox("開催日（この選択を全レースに適用）", DAY_OPTIONS, key="global_day")
+    day_global = st.selectbox("開催区分（この選択を全レースに適用）", DAY_OPTIONS, key="global_day")
 
     cols_hdr = st.columns([1,1,2,1.5])
     cols_hdr[0].markdown("**R**")
@@ -86,7 +86,7 @@ with input_tabs[0]:
 
 # B. 前日までの集計（手入力）
 with input_tabs[1]:
-    st.subheader("前日までの集計（開催日 × ランク（◎〜β）の入賞回数）")
+    st.subheader("前日までの集計（開催区分 × ランク（◎〜β）の入賞回数）")
 
     for day in DAY_OPTIONS:
         st.markdown(f"**{day}**")
@@ -110,7 +110,7 @@ with input_tabs[1]:
                 rec["C2"] += int(C2)
                 rec["C3"] += int(C3)
 
-# -------- 集計構築（開催日別 + 全体） --------
+# -------- 集計構築（開催区分別 + 全体） --------
 rank_counts_daily: Dict[Tuple[str, int], Dict[str, int]] = defaultdict(lambda: {"N":0, "C1":0, "C2":0, "C3":0})
 
 for row in byrace_rows:
@@ -119,7 +119,6 @@ for row in byrace_rows:
     finish = row["finish"]
 
     car_by_rank = {i+1: vorder[i] for i in range(len(vorder))}
-    # rank_by_car = {car: i+1 for i, car in enumerate(vorder)}  # 連対/トリオ未使用のため不要
 
     L = len(vorder)
     for i in range(1, min(L,7)+1):
@@ -146,8 +145,8 @@ for (day, r), rec in rank_counts_daily.items():
 
 # -------- 出力タブ --------
 with input_tabs[2]:
-    # 開催日別：ランク別 入賞テーブル
-    st.subheader("開催日別：ランク別 入賞テーブル（◎〜β）")
+    # 開催区分別：ランク別 入賞テーブル
+    st.subheader("開催区分別：ランク別 入賞テーブル（◎〜β）")
     for day in DAY_OPTIONS:
         rows_out = []
         for r in range(1, 8):
