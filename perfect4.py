@@ -10,8 +10,16 @@ st.set_page_config(page_title="ヴェロビ分析（開催区分別）", layout=
 st.title("ヴェロビ 組み方分析（7車・開催区分別／全体集計） v2.6")
 
 # -------- 基本設定 --------
-# 開催区分名称を「F2・F1・G」に統一
-DAY_OPTIONS = ["F2", "F1", "G"]
+# 開催区分の内部キー（順序つき）
+DAY_OPTIONS = ["L", "F2", "F1", "G"]
+
+# 表示用ラベル
+DAY_LABELS = {
+    "L": "ガールズ（L級）",
+    "F2": "F2",
+    "F1": "F1",
+    "G": "G",
+}
 
 # ランク表示：1～7 を ◎ 〇 ▲ △ × α β にマッピング（内部計算は数値のまま）
 RANK_SYMBOLS = {1: "◎", 2: "〇", 3: "▲", 4: "△", 5: "×", 6: "α", 7: "β"}
@@ -53,7 +61,12 @@ agg_counts_manual: Dict[Tuple[str, int], Dict[str, int]] = defaultdict(lambda: {
 with input_tabs[0]:
     st.subheader("日次手入力（開催区分別・最大12R）")
 
-    day_global = st.selectbox("開催区分（この選択を全レースに適用）", DAY_OPTIONS, key="global_day")
+    day_global = st.selectbox(
+        "開催区分（この選択を全レースに適用）",
+        DAY_OPTIONS,
+        key="global_day",
+        format_func=lambda k: DAY_LABELS.get(k, k),
+    )
 
     cols_hdr = st.columns([1,1,2,1.5])
     cols_hdr[0].markdown("**R**")
@@ -75,7 +88,7 @@ with input_tabs[0]:
         if any_input:
             if vorder and (4 <= field <= 7) and len(vorder) <= field:
                 byrace_rows.append({
-                    "day": day_global,
+                    "day": day_global,   # 内部キー（"L","F2","F1","G"）
                     "race": rid,
                     "field": field,
                     "vorder": vorder,
@@ -89,7 +102,7 @@ with input_tabs[1]:
     st.subheader("前日までの集計（開催区分 × ランク（◎〜β）の入賞回数）")
 
     for day in DAY_OPTIONS:
-        st.markdown(f"**{day}**")
+        st.markdown(f"**{DAY_LABELS[day]}**")
         ch = st.columns([1,1,1,1])
         ch[0].markdown("ランク（表示）")
         ch[1].markdown("N_r")
@@ -164,7 +177,7 @@ with input_tabs[2]:
                 "3着内率%": rate(C1+C2+C3,N),
             })
         df_day = pd.DataFrame(rows_out)
-        st.markdown(f"### {day}")
+        st.markdown(f"### {DAY_LABELS[day]}")
         st.dataframe(df_day, use_container_width=True, hide_index=True)
 
     # 全体：ランク別 入賞テーブル
