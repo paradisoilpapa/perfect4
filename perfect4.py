@@ -30,7 +30,7 @@ RANK_SYMBOLS = {
     7: "carFR順位７～位", 8: "carFR順位７～位", 9: "carFR順位７～位",
 }
 def rank_symbol(r: int) -> str:
-    return RANK_SYMBOLS.get(r, "無")
+    return RANK_SYMBOLS.get(r, "carFR順位７～位")
 
 
 def parse_rankline(s: str) -> List[str]:
@@ -278,6 +278,7 @@ with input_tabs[2]:
 
     st.markdown("### 全体")
     st.dataframe(pd.DataFrame(rows_total), use_container_width=True, hide_index=True)
+
 
 
 
