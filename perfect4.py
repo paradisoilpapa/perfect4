@@ -26,8 +26,8 @@ DAY_LABELS = {
 
 # ランク表示：1～MAX_FIELD（7位以降は無）
 RANK_SYMBOLS = {
-    1: "◎", 2: "〇", 3: "▲", 4: "△", 5: "×", 6: "α",
-    7: "無", 8: "無", 9: "無",
+    1: "carFR順位１位", 2: "carFR順位２位", 3: "carFR順位３位", 4: "carFR順位４位", 5: "carFR順位５位", 6: "carFR順位６位",
+    7: "carFR順位７位", 8: "carFR順位８位", 9: "carFR順位９位",
 }
 def rank_symbol(r: int) -> str:
     return RANK_SYMBOLS.get(r, "無")
@@ -278,4 +278,5 @@ with input_tabs[2]:
 
     st.markdown("### 全体")
     st.dataframe(pd.DataFrame(rows_total), use_container_width=True, hide_index=True)
+
 
