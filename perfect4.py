@@ -196,7 +196,7 @@ for (day, r), rec in rank_counts_daily.items():
 
 # -------- 出力タブ --------
 with input_tabs[2]:
-    st.subheader("開催区分別：ランク別 入賞テーブル（◎〜無）")
+    st.subheader("開催区分別：ランク別 入賞テーブル（◎〜carFR順位７～位）")
     for day in DAY_OPTIONS:
         rows_out = []
         # 1～6位は個別
@@ -225,7 +225,7 @@ with input_tabs[2]:
             C3 += rec["C3"]
         def rate(x, n): return round(100*x/n, 1) if n>0 else None
         rows_out.append({
-            "ランク": "無",
+            "ランク": "carFR順位７～位",
             "出走数N": N,
             "1着回数": C1,
             "2着回数": C2,
@@ -266,7 +266,7 @@ with input_tabs[2]:
         C3 += rec["C3"]
     def rate(x, n): return round(100*x/n, 1) if n>0 else None
     rows_total.append({
-        "ランク": "無",
+        "ランク": "carFR順位７～位",
         "出走数N": N,
         "1着回数": C1,
         "2着回数": C2,
@@ -278,6 +278,7 @@ with input_tabs[2]:
 
     st.markdown("### 全体")
     st.dataframe(pd.DataFrame(rows_total), use_container_width=True, hide_index=True)
+
 
 
 
