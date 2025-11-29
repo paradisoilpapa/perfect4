@@ -150,7 +150,7 @@ with input_tabs[1]:
 
         # 無（β以降をここに一本化）
         c0, c1, c2, c3 = st.columns([1,1,1,1])
-        c0.write("無")
+        c0.write("carFR順位７～位")
         N_mu  = c1.number_input("", key=f"agg_{day}_N_{MU_BIN_R}",  min_value=0, value=0)
         C1_mu = c2.number_input("", key=f"agg_{day}_C1_{MU_BIN_R}", min_value=0, value=0)
         c3_cols = c3.columns(2)
@@ -278,6 +278,7 @@ with input_tabs[2]:
 
     st.markdown("### 全体")
     st.dataframe(pd.DataFrame(rows_total), use_container_width=True, hide_index=True)
+
 
 
 
