@@ -5,7 +5,7 @@ import streamlit as st
 st.set_page_config(page_title="二車複 必要オッズ表", layout="wide")
 
 st.title("二車複 必要オッズ表")
-st.caption("ヴェロビ評価順を入力して、評価1位軸・評価2位軸の二車複必要オッズを車番に変換します。")
+st.caption("ヴェロビ評価順を入力して、評価1位軸・評価2位軸の二車複必要オッズを車番に変換します。買い目はヒモ車番の若番順で表示します。")
 
 # 評価順位ペアごとの過去的中率（%）
 HIT_RATE = {
@@ -55,23 +55,30 @@ def make_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
     for rank_idx in range(1, 7):
         label = f"評価1-{rank_idx + 1}"
         rate = HIT_RATE[label]
+        himo = cars[rank_idx]
         rank1_rows.append({
             "評価": label,
-            "買い目": f"{rank1_car}={cars[rank_idx]}",
+            "買い目": f"{rank1_car}={himo}",
             "必要オッズ": f"{required_odds(rate):.2f}倍",
+            "_ヒモ車番": int(himo),
         })
 
     rank2_rows = []
     for rank_idx in range(2, 7):
         label = f"評価2-{rank_idx + 1}"
         rate = HIT_RATE[label]
+        himo = cars[rank_idx]
         rank2_rows.append({
             "評価": label,
-            "買い目": f"{rank2_car}={cars[rank_idx]}",
+            "買い目": f"{rank2_car}={himo}",
             "必要オッズ": f"{required_odds(rate):.2f}倍",
+            "_ヒモ車番": int(himo),
         })
 
-    return pd.DataFrame(rank1_rows), pd.DataFrame(rank2_rows)
+    rank1_df = pd.DataFrame(rank1_rows).sort_values("_ヒモ車番").drop(columns=["_ヒモ車番"])
+    rank2_df = pd.DataFrame(rank2_rows).sort_values("_ヒモ車番").drop(columns=["_ヒモ車番"])
+
+    return rank1_df, rank2_df
 
 
 # 2. 基準となる必要オッズ表は常時表示
@@ -106,6 +113,6 @@ if calc:
         st.markdown(f"### 評価2位軸：{cars[1]}")
         st.dataframe(rank2_df, use_container_width=True, hide_index=True)
 
-    st.info("実オッズが必要オッズを超えている買い目だけを買い候補にします。※印や優先候補の自動選別は入れていません。")
+    st.info("実オッズが必要オッズを超えている買い目だけを買い候補にします。買い目はヒモ車番の若番順です。")
 else:
     st.info("評価順を入力して『計算』を押してください。")
