@@ -5,95 +5,107 @@ import streamlit as st
 st.set_page_config(page_title="二車複 必要オッズ表", layout="wide")
 
 st.title("二車複 必要オッズ表")
-st.caption("ヴェロビ評価順を貼るだけで、評価1位軸・評価2位軸の二車複必要オッズを表示します。")
+st.caption("ヴェロビ評価順を入力して、評価1位軸・評価2位軸の二車複必要オッズを車番に変換します。")
 
 # 評価順位ペアごとの過去的中率（%）
 HIT_RATE = {
-    "1-2": 21.6,
-    "1-3": 12.2,
-    "1-4": 9.7,
-    "1-5": 4.6,
-    "1-6": 3.1,
-    "1-7": 1.0,
-    "2-3": 8.9,
-    "2-4": 6.9,
-    "2-5": 5.1,
-    "2-6": 3.1,
-    "2-7": 2.3,
+    "評価1-2": 21.6,
+    "評価1-3": 12.2,
+    "評価1-4": 9.7,
+    "評価1-5": 4.6,
+    "評価1-6": 3.1,
+    "評価1-7": 1.0,
+    "評価2-3": 8.9,
+    "評価2-4": 6.9,
+    "評価2-5": 5.1,
+    "評価2-6": 3.1,
+    "評価2-7": 2.3,
 }
+
+
+def required_odds(rate: float) -> float:
+    """損益分岐オッズ。期待値100に必要なオッズ。"""
+    return round(100.0 / rate, 2) if rate > 0 else 0.0
 
 
 def normalize_rank_text(text: str) -> list[str]:
     """評価順テキストから1〜7の車番を抽出する。例: '2715364' -> ['2','7','1','5','3','6','4']"""
     nums = re.findall(r"[1-7]", text or "")
-    # 重複をそのまま通すと誤変換するため、7車が1回ずつ出ているか確認
     if len(nums) != 7 or len(set(nums)) != 7:
         return []
     return nums
 
 
-def required_odds(rate: float) -> float:
-    return round(100.0 / rate, 2) if rate > 0 else 0.0
-
-
-def make_rows(cars: list[str]) -> pd.DataFrame:
+def make_base_table() -> pd.DataFrame:
     rows = []
+    for label, rate in HIT_RATE.items():
+        rows.append({
+            "評価": label,
+            "的中率": f"{rate:.1f}%",
+            "必要オッズ": f"{required_odds(rate):.2f}倍",
+        })
+    return pd.DataFrame(rows)
 
-    # 評価1位軸：評価2〜7位へ
+
+def make_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
     rank1_car = cars[0]
-    for rank_idx in range(1, 7):
-        eval_pair = f"1-{rank_idx + 1}"
-        rate = HIT_RATE[eval_pair]
-        rows.append({
-            "軸": f"評価1位軸：{rank1_car}",
-            "買い目": f"{rank1_car}={cars[rank_idx]}",
-            "必要オッズ": required_odds(rate),
-        })
-
-    # 評価2位軸：評価3〜7位へ
     rank2_car = cars[1]
-    for rank_idx in range(2, 7):
-        eval_pair = f"2-{rank_idx + 1}"
-        rate = HIT_RATE[eval_pair]
-        rows.append({
-            "軸": f"評価2位軸：{rank2_car}",
-            "買い目": f"{rank2_car}={cars[rank_idx]}",
-            "必要オッズ": required_odds(rate),
+
+    rank1_rows = []
+    for rank_idx in range(1, 7):
+        label = f"評価1-{rank_idx + 1}"
+        rate = HIT_RATE[label]
+        rank1_rows.append({
+            "評価": label,
+            "買い目": f"{rank1_car}={cars[rank_idx]}",
+            "必要オッズ": f"{required_odds(rate):.2f}倍",
         })
 
-    df = pd.DataFrame(rows)
-    # 買いすぎ防止：必要オッズが安い上位3点だけ※
-    top3_idx = df.nsmallest(3, "必要オッズ").index
-    df.insert(0, "※", "")
-    df.loc[top3_idx, "※"] = "※"
-    return df
+    rank2_rows = []
+    for rank_idx in range(2, 7):
+        label = f"評価2-{rank_idx + 1}"
+        rate = HIT_RATE[label]
+        rank2_rows.append({
+            "評価": label,
+            "買い目": f"{rank2_car}={cars[rank_idx]}",
+            "必要オッズ": f"{required_odds(rate):.2f}倍",
+        })
+
+    return pd.DataFrame(rank1_rows), pd.DataFrame(rank2_rows)
 
 
-rank_text = st.text_input("ヴェロビ評価順（例：2715364）", value="2715364")
-cars = normalize_rank_text(rank_text)
+# 2. 基準となる必要オッズ表は常時表示
+st.subheader("基準となる必要オッズ表")
+st.caption("この表の『評価1-2』などは、評価順位同士の組み合わせです。実車番は下の計算結果で変換します。")
+st.dataframe(make_base_table(), use_container_width=True, hide_index=True)
 
-if not cars:
-    st.warning("1〜7の車番を重複なく7つ入力してください。例：2715364")
-    st.stop()
+st.divider()
 
-df = make_rows(cars)
+st.subheader("評価順を入力して計算")
+rank_text = st.text_input("ヴェロビ評価順（例：2715364）", value="", placeholder="2715364")
+calc = st.button("計算", type="primary")
 
-st.subheader("必要オッズ表")
-st.caption("※は、必要オッズが安い上位3点です。買い確定ではなく、まず見る優先候補です。")
+if calc:
+    cars = normalize_rank_text(rank_text)
 
-for axis_name, part in df.groupby("軸", sort=False):
-    st.markdown(f"### {axis_name}")
-    st.dataframe(
-        part[["※", "買い目", "必要オッズ"]],
-        use_container_width=True,
-        hide_index=True,
-    )
+    if not cars:
+        st.error("1〜7の車番を重複なく7つ入力してください。例：2715364")
+        st.stop()
 
-st.subheader("※ 優先候補")
-st.dataframe(
-    df[df["※"] == "※"][["買い目", "必要オッズ"]].sort_values("必要オッズ"),
-    use_container_width=True,
-    hide_index=True,
-)
+    rank1_df, rank2_df = make_axis_tables(cars)
 
-st.info("実オッズが必要オッズを超えている買い目だけを買い候補にします。")
+    st.success(f"評価順：{' → '.join(cars)}")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(f"### 評価1位軸：{cars[0]}")
+        st.dataframe(rank1_df, use_container_width=True, hide_index=True)
+
+    with col2:
+        st.markdown(f"### 評価2位軸：{cars[1]}")
+        st.dataframe(rank2_df, use_container_width=True, hide_index=True)
+
+    st.info("実オッズが必要オッズを超えている買い目だけを買い候補にします。※印や優先候補の自動選別は入れていません。")
+else:
+    st.info("評価順を入力して『計算』を押してください。")
