@@ -7,7 +7,6 @@ st.set_page_config(page_title="二車複・二車単 必要オッズ表", layout
 st.title("二車複・二車単 必要オッズ表")
 st.caption(
     "ヴェロビ評価順を入力して、評価順位ベースの二車複・二車単必要オッズを車番に変換します。"
-    "二車複は期待値の芯、二車単は上位評価の頭狙い確認用です。"
 )
 
 TOTAL_N = 394
@@ -28,7 +27,7 @@ EXACTA_COUNT = {
 def normalize_rank_text(text: str) -> list[str]:
     """
     評価順テキストから1〜7の車番を抽出する。
-    例：'2715364' → ['2', '7', '1', '5', '3', '6', '4']
+    例：2715364 → ['2', '7', '1', '5', '3', '6', '4']
     """
     nums = re.findall(r"[1-7]", text or "")
     if len(nums) != 7 or len(set(nums)) != 7:
@@ -73,7 +72,7 @@ def fmt_odds(count: int) -> str:
 
 def max_rank_in_text(value: str) -> int:
     """
-    '評価1-5' や '評価2→4' から最大評価順位を取り出す。
+    評価1-5 / 評価2→4 などから最大評価順位を取り出す。
     """
     nums = re.findall(r"\d+", str(value))
     if not nums:
@@ -92,8 +91,6 @@ def highlight_rank_1_to_5(row):
         target_col = "評価ペア"
     elif "評価方向" in row.index:
         target_col = "評価方向"
-    elif "評価順位" in row.index:
-        target_col = "評価順位"
 
     if target_col is None:
         return [""] * len(row)
@@ -108,42 +105,6 @@ def highlight_rank_1_to_5(row):
 
 def styled_df(df: pd.DataFrame):
     return df.style.apply(highlight_rank_1_to_5, axis=1)
-
-
-def make_rank_map_table(cars: list[str]) -> pd.DataFrame:
-    rows = []
-    for idx, car in enumerate(cars, start=1):
-        rows.append({
-            "評価順位": f"評価{idx}",
-            "車番": car,
-        })
-    return pd.DataFrame(rows)
-
-
-def make_quinella_base_table() -> pd.DataFrame:
-    """
-    基準となる二車複必要オッズ表。
-    評価1位軸・評価2位軸のみ。
-    """
-    pairs = []
-
-    for b in range(2, 8):
-        pairs.append((1, b))
-
-    for b in range(3, 8):
-        pairs.append((2, b))
-
-    rows = []
-    for a, b in pairs:
-        count = quinella_count(a, b)
-        rows.append({
-            "評価ペア": f"評価{a}-{b}",
-            "回数": count,
-            "的中率": fmt_rate(count),
-            "必要オッズ": fmt_odds(count),
-        })
-
-    return pd.DataFrame(rows)
 
 
 def make_quinella_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -201,6 +162,7 @@ def make_exacta_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame
     """
     入力された評価順を車番に変換した二車単表。
     評価1位頭・評価2位頭を表示。
+    買い目はヒモ車番の若番順。
     """
     rank1_car = cars[0]
     rank2_car = cars[1]
@@ -248,27 +210,6 @@ def make_exacta_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame
     return rank1_df, rank2_df
 
 
-# ----------------------------
-# 基準表
-# ----------------------------
-
-st.subheader("基準：二車複 必要オッズ表")
-st.caption(
-    "二車複は、評価順位同士の双方向合算です。"
-    "例：評価1-2 = 評価1→2 + 評価2→1。"
-)
-st.dataframe(
-    styled_df(make_quinella_base_table()),
-    use_container_width=True,
-    hide_index=True,
-)
-
-st.divider()
-
-# ----------------------------
-# 入力
-# ----------------------------
-
 st.subheader("評価順を入力して計算")
 
 rank_text = st.text_input(
@@ -286,18 +227,10 @@ if calc:
         st.error("1〜7の車番を重複なく7つ入力してください。例：2715364")
         st.stop()
 
-    rank_map_df = make_rank_map_table(cars)
     q_rank1_df, q_rank2_df = make_quinella_axis_tables(cars)
     e_rank1_df, e_rank2_df = make_exacta_axis_tables(cars)
 
     st.success(f"評価順：{' → '.join(cars)}")
-
-    st.markdown("## 評価順位 → 車番")
-    st.dataframe(
-        styled_df(rank_map_df),
-        use_container_width=True,
-        hide_index=True,
-    )
 
     st.markdown("## 二車複 必要オッズ")
 
@@ -342,7 +275,7 @@ if calc:
     st.info(
         "実オッズが必要オッズを超えている買い目だけを買い候補にします。"
         "二車複は期待値の芯、二車単は評価上位が頭になる方向の上乗せ確認用です。"
-        "評価6・7絡みは色を付けず、慎重に扱います。"
+        "評価6・7絡みは慎重に扱います。"
     )
 
 else:
