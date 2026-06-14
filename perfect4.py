@@ -798,13 +798,12 @@ def nishafuku_3412_bets_from_order(vorder: List[str]) -> List[str]:
 
 
 # 123-123-4 三連複3点の推定集計。
-# 実三連複配当は入力していないため、N/H/必要平均配当だけを出す。
+# 実三連複配当は入力していないため、N/H/的中率だけを出す。金額・回収率は出さない。
 # 1→2着評価分布と評価別3着回数から、3着を条件付き按分して推定する。
 TRIO_1231234_LABEL = "123-123-4 三連複3点"
 TRIO_1231234_KEYS = ["1-2-4", "1-3-4", "2-3-4"]
 TRIO_1231234_TOP_SET = {1, 2, 3}
 TRIO_1231234_TARGET = 4
-
 
 TRIO_1241243_LABEL = "124-124-3 三連複3点"
 TRIO_1241243_KEYS = ["1-2-3", "1-3-4", "2-3-4"]
@@ -847,7 +846,6 @@ def estimate_trio_1231234_from_pair12_and_rank(pair12_counts: Dict[PairKey, int]
     """
     total_n = sum(int(v) for v in pair12_counts.values())
     ksum = int(total_n) * len(TRIO_1231234_KEYS)
-    invest = ksum * 100
 
     c3_by_rank = {r: int(rank_counts.get(r, {}).get("C3", 0)) for r in range(1, FIELD_SIZE + 1)}
     est_h = 0.0
@@ -883,16 +881,12 @@ def estimate_trio_1231234_from_pair12_and_rank(pair12_counts: Dict[PairKey, int]
             })
 
     hit_rate = round(100.0 * est_h / total_n, 1) if total_n > 0 else None
-    need_avg_pay = round(invest / est_h, 1) if est_h > 0 else None
-
     return {
         "型": TRIO_1231234_LABEL,
         "対象N": int(total_n),
         "総点数KSUM": int(ksum),
-        "投資額換算": int(invest),
         "推定H": round(est_h, 1),
         "推定的中率%": hit_rate,
-        "100%必要平均配当": need_avg_pay,
         "構成": " / ".join(TRIO_1231234_KEYS),
         "detail_rows": detail_rows,
     }
@@ -903,19 +897,17 @@ def trio_1231234_daily_row(rec: Dict[str, int]) -> Dict:
     N = int(rec.get("N", 0))
     KSUM = int(rec.get("KSUM", 0))
     H = int(rec.get("H", 0))
-    invest = KSUM * 100
     hit_rate = round(100.0 * H / N, 1) if N > 0 else None
-    need_avg_pay = round(invest / H, 1) if H > 0 else None
     return {
         "型": "123-123-4｜今日入力・実着順",
         "対象N": N,
         "総点数KSUM": KSUM,
-        "投資額換算": invest,
         "的中H": H,
         "的中率%": hit_rate,
-        "100%必要平均配当": need_avg_pay,
         "構成": " / ".join(TRIO_1231234_KEYS),
     }
+
+
 
 
 def _trio_1241243_is_hit_ranks(ranks) -> bool:
@@ -945,15 +937,10 @@ def hit_trio_1241243(vorder: List[str], finish: List[str], field_n: int) -> bool
 def estimate_trio_1241243_from_pair12_and_rank(pair12_counts: Dict[PairKey, int], rank_counts: Dict[int, Dict[str, int]]) -> Dict:
     """
     124-124-3三連複3点を、既存の2車複ブロックと評価別3着回数から推定する。
-
     実3連複配当がないため、払戻SUMは出さない。
-    推定方法：
-      1着→2着の各評価ペアごとに、残り評価の3着回数比で3着評価を按分。
-      その3着評価を加えた3つの評価が 1-2-3 / 1-3-4 / 2-3-4 なら推定Hに加算。
     """
     total_n = sum(int(v) for v in pair12_counts.values())
     ksum = int(total_n) * len(TRIO_1241243_KEYS)
-    invest = ksum * 100
 
     c3_by_rank = {r: int(rank_counts.get(r, {}).get("C3", 0)) for r in range(1, FIELD_SIZE + 1)}
     est_h = 0.0
@@ -989,16 +976,12 @@ def estimate_trio_1241243_from_pair12_and_rank(pair12_counts: Dict[PairKey, int]
             })
 
     hit_rate = round(100.0 * est_h / total_n, 1) if total_n > 0 else None
-    need_avg_pay = round(invest / est_h, 1) if est_h > 0 else None
-
     return {
         "型": TRIO_1241243_LABEL,
         "対象N": int(total_n),
         "総点数KSUM": int(ksum),
-        "投資額換算": int(invest),
         "推定H": round(est_h, 1),
         "推定的中率%": hit_rate,
-        "100%必要平均配当": need_avg_pay,
         "構成": " / ".join(TRIO_1241243_KEYS),
         "detail_rows": detail_rows,
     }
@@ -1009,17 +992,13 @@ def trio_1241243_daily_row(rec: Dict[str, int]) -> Dict:
     N = int(rec.get("N", 0))
     KSUM = int(rec.get("KSUM", 0))
     H = int(rec.get("H", 0))
-    invest = KSUM * 100
     hit_rate = round(100.0 * H / N, 1) if N > 0 else None
-    need_avg_pay = round(invest / H, 1) if H > 0 else None
     return {
         "型": "124-124-3｜今日入力・実着順",
         "対象N": N,
         "総点数KSUM": KSUM,
-        "投資額換算": invest,
         "的中H": H,
         "的中率%": hit_rate,
-        "100%必要平均配当": need_avg_pay,
         "構成": " / ".join(TRIO_1241243_KEYS),
     }
 
@@ -3106,20 +3085,17 @@ for row in byrace_rows:
     if field_n < 4:
         continue
 
-    rec_1231234 = payout_trio_1231234_daily[TRIO_1231234_LABEL]
-    rec_1231234["N"] += 1
-    rec_1231234["KSUM"] += len(TRIO_1231234_KEYS)
-
+    rec = payout_trio_1231234_daily[TRIO_1231234_LABEL]
+    rec["N"] += 1
+    rec["KSUM"] += len(TRIO_1231234_KEYS)
     if hit_trio_1231234(vorder, finish, field_n):
-        rec_1231234["H"] += 1
+        rec["H"] += 1
 
-    rec_1241243 = payout_trio_1241243_daily[TRIO_1241243_LABEL]
-    rec_1241243["N"] += 1
-    rec_1241243["KSUM"] += len(TRIO_1241243_KEYS)
-
+    rec = payout_trio_1241243_daily[TRIO_1241243_LABEL]
+    rec["N"] += 1
+    rec["KSUM"] += len(TRIO_1241243_KEYS)
     if hit_trio_1241243(vorder, finish, field_n):
-        rec_1241243["H"] += 1
-
+        rec["H"] += 1
 
 
 # --- 3連複 1-2-全（日次） ---
@@ -3914,34 +3890,31 @@ with tabs[2]:
     st.markdown("### 123-123-4 / 124-124-3 三連複3点｜推定集計ゾーン")
     st.caption(
         "実三連複配当は入力しません。既存の1→2着評価分布と評価別3着回数から、"
-        "123-123-4（1-2-4 / 1-3-4 / 2-3-4）と、"
-        "124-124-3（1-2-3 / 1-3-4 / 2-3-4）を同じ表で比較します。"
-        "日次入力分だけは実着順から的中Hを出します。"
+        "123-123-4 と 124-124-3 の3点的中数を条件付き按分で推定します。"
+        "金額・払戻・回収率は出しません。日次入力分だけは実着順から的中Hを出します。"
     )
 
     trio_1231234_est = estimate_trio_1231234_from_pair12_and_rank(pair12_total, rank_total)
     trio_1241243_est = estimate_trio_1241243_from_pair12_and_rank(pair12_total, rank_total)
     rec_trio_1231234_daily = payout_trio_1231234_daily.get(TRIO_1231234_LABEL, new_payout_rec())
     rec_trio_1241243_daily = payout_trio_1241243_daily.get(TRIO_1241243_LABEL, new_payout_rec())
-    df_trio_compare = pd.DataFrame([
+    df_trio_1231234 = pd.DataFrame([
         trio_1231234_daily_row(rec_trio_1231234_daily),
         {k: v for k, v in trio_1231234_est.items() if k != "detail_rows"},
         trio_1241243_daily_row(rec_trio_1241243_daily),
         {k: v for k, v in trio_1241243_est.items() if k != "detail_rows"},
     ])
-    cols_trio_compare = [
+    cols_trio_1231234 = [
         "型",
         "構成",
         "対象N",
         "総点数KSUM",
-        "投資額換算",
         "的中H",
         "的中率%",
         "推定H",
         "推定的中率%",
-        "100%必要平均配当",
     ]
-    render_sortable_table(df_trio_compare[[c for c in cols_trio_compare if c in df_trio_compare.columns]])
+    render_sortable_table(df_trio_1231234[[c for c in cols_trio_1231234 if c in df_trio_1231234.columns]])
 
     if trio_1231234_est.get("detail_rows"):
         with st.expander("123-123-4 推定内訳（1→2着ペア別）", expanded=False):
@@ -4801,7 +4774,7 @@ with tabs[2]:
     st.info(
         "個別3連複の引継ぎ表は廃止しました。"
         "三連複フォメは、上の評価別入賞回数と1→2着評価分布だけで"
-        "想定的中率・必要平均払戻を算出します。"
+        "想定的中率を算出します。実配当がないため、金額・回収率は出しません。"
     )
 
     st.divider()
