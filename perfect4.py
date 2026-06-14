@@ -246,6 +246,87 @@ def make_exacta_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame
     return rank1_df, rank2_df
 
 
+def trio_key_to_bet(cars: list[str], ranks: tuple[int, int, int]) -> str | None:
+    """評価順位3つを車番の三連複表記へ変換する。"""
+    n = len(cars)
+    if any(r < 1 or r > n for r in ranks):
+        return None
+
+    car_nums = sorted(int(cars[r - 1]) for r in ranks)
+    return "-".join(str(x) for x in car_nums)
+
+
+def make_trio_compare_table(cars: list[str]) -> pd.DataFrame:
+    """
+    123-123-4 と 124-124-3 を比較表示する。
+    実配当や実的中率はこのアプリ単体では持たないため、買い目変換と構成差だけを出す。
+    """
+    patterns = [
+        {
+            "型": "123-123-4",
+            "評価3連複": [(1, 2, 4), (1, 3, 4), (2, 3, 4)],
+            "狙い": "評価4を3着内要員にする。1-2-3安目を最初から外す。",
+        },
+        {
+            "型": "124-124-3",
+            "評価3連複": [(1, 2, 3), (1, 3, 4), (2, 3, 4)],
+            "狙い": "評価3を軸側にする。1-2-3が入るので安目注意。",
+        },
+    ]
+
+    rows = []
+    for p in patterns:
+        bet_list = []
+        rank_list = []
+        for ranks in p["評価3連複"]:
+            bet = trio_key_to_bet(cars, ranks)
+            if bet is not None:
+                rank_list.append("-".join(str(x) for x in ranks))
+                bet_list.append(bet)
+
+        rows.append({
+            "型": p["型"],
+            "評価組み合わせ": " / ".join(rank_list),
+            "車番買い目": " / ".join(bet_list),
+            "点数": len(bet_list),
+            "狙い": p["狙い"],
+        })
+
+    return pd.DataFrame(rows)
+
+
+def make_trio_detail_table(cars: list[str]) -> pd.DataFrame:
+    """比較用に、共通目と違う目を分けて表示する。"""
+    pattern_a = {(1, 2, 4), (1, 3, 4), (2, 3, 4)}
+    pattern_b = {(1, 2, 3), (1, 3, 4), (2, 3, 4)}
+
+    rows = []
+    for ranks in sorted(pattern_a | pattern_b):
+        bet = trio_key_to_bet(cars, ranks)
+        if bet is None:
+            continue
+
+        in_a = ranks in pattern_a
+        in_b = ranks in pattern_b
+
+        if in_a and in_b:
+            note = "共通"
+        elif in_a:
+            note = "123-123-4だけ"
+        else:
+            note = "124-124-3だけ"
+
+        rows.append({
+            "評価3連複": "-".join(str(x) for x in ranks),
+            "車番買い目": bet,
+            "123-123-4": "○" if in_a else "",
+            "124-124-3": "○" if in_b else "",
+            "違い": note,
+        })
+
+    return pd.DataFrame(rows)
+
+
 st.subheader("評価順を入力して計算")
 
 rank_text = st.text_input(
@@ -265,6 +346,8 @@ if calc:
 
     q_rank1_df, q_rank2_df = make_quinella_axis_tables(cars)
     e_rank1_df, e_rank2_df = make_exacta_axis_tables(cars)
+    trio_compare_df = make_trio_compare_table(cars)
+    trio_detail_df = make_trio_detail_table(cars)
 
     st.success(f"評価順：{' → '.join(cars)}")
 
@@ -312,9 +395,26 @@ if calc:
                 hide_index=True,
             )
 
+    st.markdown("## 三連複 3点比較")
+    st.caption("123-123-4 と 124-124-3 を車番買い目に変換して比較します。実配当・実的中率はここでは出しません。")
+
+    st.dataframe(
+        trio_compare_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.markdown("### 共通目・差分")
+    st.dataframe(
+        trio_detail_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
     st.info(
         "赤：評価1-2｜青：評価1-3・評価2-3｜黄：評価1-4・評価2-4｜緑：評価1-5・評価2-5。"
         "二車複は必要オッズを超えた組み合わせを芯候補として確認します。"
+        "三連複比較は、123-123-4と124-124-3の買い目差分確認用です。"
     )
 
 else:
