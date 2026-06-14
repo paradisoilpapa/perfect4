@@ -5,9 +5,7 @@ import streamlit as st
 st.set_page_config(page_title="二車複・二車単 必要オッズ表", layout="wide")
 
 st.title("二車複・二車単 必要オッズ表")
-st.caption(
-    "ヴェロビ評価順を入力して、評価順位ベースの二車複・二車単必要オッズを車番に変換します。"
-)
+st.caption("ヴェロビ評価順を入力して、二車複・二車単の必要オッズを車番に変換します。")
 
 TOTAL_N = 394
 
@@ -25,10 +23,6 @@ EXACTA_COUNT = {
 
 
 def normalize_rank_text(text: str) -> list[str]:
-    """
-    評価順テキストから1〜7の車番を抽出する。
-    例：2715364 → ['2', '7', '1', '5', '3', '6', '4']
-    """
     nums = re.findall(r"[1-7]", text or "")
     if len(nums) != 7 or len(set(nums)) != 7:
         return []
@@ -36,26 +30,20 @@ def normalize_rank_text(text: str) -> list[str]:
 
 
 def exacta_count(first_rank: int, second_rank: int) -> int:
-    """評価順位ベースの二車単回数"""
     if first_rank == second_rank:
         return 0
     return EXACTA_COUNT.get(first_rank, {}).get(second_rank, 0)
 
 
 def quinella_count(rank_a: int, rank_b: int) -> int:
-    """評価順位ベースの二車複回数。双方向合算。"""
     return exacta_count(rank_a, rank_b) + exacta_count(rank_b, rank_a)
 
 
 def hit_rate_from_count(count: int) -> float:
-    """総数に対する的中率%"""
-    if count <= 0:
-        return 0.0
-    return count / TOTAL_N * 100
+    return count / TOTAL_N * 100 if count > 0 else 0.0
 
 
 def required_odds_from_count(count: int) -> float | None:
-    """損益分岐オッズ。期待値100に必要なオッズ。"""
     if count <= 0:
         return None
     return TOTAL_N / count
@@ -71,10 +59,6 @@ def fmt_odds(count: int) -> str:
 
 
 def extract_rank_pair(value: str) -> tuple[int, int] | None:
-    """
-    '評価1-3' や '評価2→1' から評価順位ペアを取り出す。
-    二車複・二車単どちらでも、色分けは順位ペアで判定する。
-    """
     nums = re.findall(r"\d+", str(value))
     if len(nums) < 2:
         return None
@@ -90,11 +74,12 @@ def extract_rank_pair(value: str) -> tuple[int, int] | None:
 
 def highlight_rank_pair(row):
     """
-    網掛けルール：
+    色分け：
     評価1-2              → 薄赤
     評価1-3 / 評価2-3   → 薄青
-    評価1-4 / 評価2-4   → 薄緑
-    それ以外             → 白
+    評価1-4 / 評価2-4
+    評価1-5 / 評価2-5   → 薄緑
+    その他              → 白
     """
     target_col = None
 
@@ -114,7 +99,7 @@ def highlight_rank_pair(row):
     if pair in [(1, 3), (2, 3)]:
         return ["background-color: #e8f1ff"] * len(row)  # 薄青
 
-    if pair in [(1, 4), (2, 4)]:
+    if pair in [(1, 4), (2, 4), (1, 5), (2, 5)]:
         return ["background-color: #eaf7f0"] * len(row)  # 薄緑
 
     return [""] * len(row)
@@ -125,10 +110,6 @@ def styled_df(df: pd.DataFrame):
 
 
 def make_quinella_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    入力された評価順を車番に変換した二車複表。
-    買い目はヒモ車番の若番順。
-    """
     rank1_car = cars[0]
     rank2_car = cars[1]
 
@@ -176,11 +157,6 @@ def make_quinella_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFra
 
 
 def make_exacta_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    入力された評価順を車番に変換した二車単表。
-    評価1位頭・評価2位頭を表示。
-    買い目はヒモ車番の若番順。
-    """
     rank1_car = cars[0]
     rank2_car = cars[1]
 
@@ -290,8 +266,8 @@ if calc:
         )
 
     st.info(
-        "赤は評価1-2、青は評価1-3・評価2-3、緑は評価1-4・評価2-4です。"
-        "二車複で必要オッズを超えた組み合わせを軸に、評価4位までを三連複ヒモ候補として見る想定です。"
+        "赤：評価1-2｜青：評価1-3・評価2-3｜緑：評価1-4・評価2-4・評価1-5・評価2-5。"
+        "二車複で必要オッズを超えた組み合わせを芯に、三連複は評価3〜5位をヒモ候補として見ます。"
     )
 
 else:
