@@ -70,20 +70,31 @@ def fmt_odds(count: int) -> str:
     return f"{odds:.2f}倍" if odds is not None else "—"
 
 
-def max_rank_in_text(value: str) -> int:
+def extract_rank_pair(value: str) -> tuple[int, int] | None:
     """
-    評価1-5 / 評価2→4 などから最大評価順位を取り出す。
+    '評価1-3' や '評価2→1' から評価順位ペアを取り出す。
+    二車複・二車単どちらでも、色分けは順位ペアで判定する。
     """
     nums = re.findall(r"\d+", str(value))
-    if not nums:
-        return 99
-    return max(int(n) for n in nums)
+    if len(nums) < 2:
+        return None
+
+    a = int(nums[0])
+    b = int(nums[1])
+
+    if a == b:
+        return None
+
+    return tuple(sorted((a, b)))
 
 
-def highlight_rank_1_to_5(row):
+def highlight_rank_pair(row):
     """
-    評価1〜5位までの組み合わせ・方向に薄緑を付ける。
-    評価6・7絡みは白のまま。
+    網掛けルール：
+    評価1-2              → 薄赤
+    評価1-3 / 評価2-3   → 薄青
+    評価1-4 / 評価2-4   → 薄緑
+    それ以外             → 白
     """
     target_col = None
 
@@ -95,16 +106,22 @@ def highlight_rank_1_to_5(row):
     if target_col is None:
         return [""] * len(row)
 
-    max_rank = max_rank_in_text(row[target_col])
+    pair = extract_rank_pair(row[target_col])
 
-    if max_rank <= 5:
-        return ["background-color: #eaf7f0"] * len(row)
+    if pair == (1, 2):
+        return ["background-color: #fde2e2"] * len(row)  # 薄赤
+
+    if pair in [(1, 3), (2, 3)]:
+        return ["background-color: #e8f1ff"] * len(row)  # 薄青
+
+    if pair in [(1, 4), (2, 4)]:
+        return ["background-color: #eaf7f0"] * len(row)  # 薄緑
 
     return [""] * len(row)
 
 
 def styled_df(df: pd.DataFrame):
-    return df.style.apply(highlight_rank_1_to_5, axis=1)
+    return df.style.apply(highlight_rank_pair, axis=1)
 
 
 def make_quinella_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -273,9 +290,8 @@ if calc:
         )
 
     st.info(
-        "実オッズが必要オッズを超えている買い目だけを買い候補にします。"
-        "二車複は期待値の芯、二車単は評価上位が頭になる方向の上乗せ確認用です。"
-        "評価6・7絡みは慎重に扱います。"
+        "赤は評価1-2、青は評価1-3・評価2-3、緑は評価1-4・評価2-4です。"
+        "二車複で必要オッズを超えた組み合わせを軸に、評価4位までを三連複ヒモ候補として見る想定です。"
     )
 
 else:
