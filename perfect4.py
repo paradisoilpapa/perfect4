@@ -26,6 +26,7 @@ def normalize_rank_text(text: str) -> list[str]:
     """
     評価順テキストから1〜7の車番を抽出する。
     5〜7車対応。
+
     例：
     41325   → ['4', '1', '3', '2', '5']
     2715364 → ['2', '7', '1', '5', '3', '6', '4']
@@ -42,20 +43,24 @@ def normalize_rank_text(text: str) -> list[str]:
 
 
 def exacta_count(first_rank: int, second_rank: int) -> int:
+    """評価順位ベースの二車単回数"""
     if first_rank == second_rank:
         return 0
     return EXACTA_COUNT.get(first_rank, {}).get(second_rank, 0)
 
 
 def quinella_count(rank_a: int, rank_b: int) -> int:
+    """評価順位ベースの二車複回数。双方向合算。"""
     return exacta_count(rank_a, rank_b) + exacta_count(rank_b, rank_a)
 
 
 def hit_rate_from_count(count: int) -> float:
+    """総数に対する的中率%"""
     return count / TOTAL_N * 100 if count > 0 else 0.0
 
 
 def required_odds_from_count(count: int) -> float | None:
+    """損益分岐オッズ。期待値100に必要なオッズ。"""
     if count <= 0:
         return None
     return TOTAL_N / count
@@ -71,7 +76,12 @@ def fmt_odds(count: int) -> str:
 
 
 def extract_rank_pair(value: str) -> tuple[int, int] | None:
+    """
+    評価1-3 / 評価2→4 などから評価順位ペアを取り出す。
+    二車複・二車単ともに、色分けは順位ペアで判定する。
+    """
     nums = re.findall(r"\d+", str(value))
+
     if len(nums) < 2:
         return None
 
@@ -125,10 +135,15 @@ def styled_df(df: pd.DataFrame):
 
 
 def make_quinella_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    入力された評価順を車番に変換した二車複表。
+    評価1位軸・評価2位軸を作成。
+    買い目はヒモ車番の若番順。
+    """
     n = len(cars)
 
     rank1_car = cars[0]
-    rank2_car = cars[1] if n >= 2 else None
+    rank2_car = cars[1]
 
     rank1_rows = []
     for rank_b in range(2, n + 1):
@@ -145,19 +160,18 @@ def make_quinella_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFra
         })
 
     rank2_rows = []
-    if rank2_car is not None:
-        for rank_b in range(3, n + 1):
-            himo = cars[rank_b - 1]
-            count = quinella_count(2, rank_b)
+    for rank_b in range(3, n + 1):
+        himo = cars[rank_b - 1]
+        count = quinella_count(2, rank_b)
 
-            rank2_rows.append({
-                "買い目": f"{rank2_car}={himo}",
-                "評価ペア": f"評価2-{rank_b}",
-                "回数": count,
-                "的中率": fmt_rate(count),
-                "必要オッズ": fmt_odds(count),
-                "_ヒモ車番": int(himo),
-            })
+        rank2_rows.append({
+            "買い目": f"{rank2_car}={himo}",
+            "評価ペア": f"評価2-{rank_b}",
+            "回数": count,
+            "的中率": fmt_rate(count),
+            "必要オッズ": fmt_odds(count),
+            "_ヒモ車番": int(himo),
+        })
 
     rank1_df = (
         pd.DataFrame(rank1_rows)
@@ -176,10 +190,15 @@ def make_quinella_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFra
 
 
 def make_exacta_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    入力された評価順を車番に変換した二車単表。
+    評価1位頭・評価2位頭を作成。
+    買い目はヒモ車番の若番順。
+    """
     n = len(cars)
 
     rank1_car = cars[0]
-    rank2_car = cars[1] if n >= 2 else None
+    rank2_car = cars[1]
 
     rank1_rows = []
     for rank_b in range(2, n + 1):
@@ -196,21 +215,20 @@ def make_exacta_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame
         })
 
     rank2_rows = []
-    if rank2_car is not None:
-        tail_rank_list = [1] + list(range(3, n + 1))
+    tail_rank_list = [1] + list(range(3, n + 1))
 
-        for rank_b in tail_rank_list:
-            tail = cars[rank_b - 1]
-            count = exacta_count(2, rank_b)
+    for rank_b in tail_rank_list:
+        tail = cars[rank_b - 1]
+        count = exacta_count(2, rank_b)
 
-            rank2_rows.append({
-                "買い目": f"{rank2_car}-{tail}",
-                "評価方向": f"評価2→{rank_b}",
-                "回数": count,
-                "的中率": fmt_rate(count),
-                "必要オッズ": fmt_odds(count),
-                "_ヒモ車番": int(tail),
-            })
+        rank2_rows.append({
+            "買い目": f"{rank2_car}-{tail}",
+            "評価方向": f"評価2→{rank_b}",
+            "回数": count,
+            "的中率": fmt_rate(count),
+            "必要オッズ": fmt_odds(count),
+            "_ヒモ車番": int(tail),
+        })
 
     rank1_df = (
         pd.DataFrame(rank1_rows)
@@ -251,6 +269,7 @@ if calc:
     st.success(f"評価順：{' → '.join(cars)}")
 
     st.markdown("## 二車複 必要オッズ")
+    st.caption("色の優先度：赤 → 青 → 黄 → 緑")
 
     col1, col2 = st.columns(2)
 
@@ -272,6 +291,7 @@ if calc:
             )
 
     st.markdown("## 二車単 必要オッズ")
+    st.caption("色の優先度：赤 → 青 → 黄 → 緑")
 
     col3, col4 = st.columns(2)
 
