@@ -5,7 +5,7 @@ import streamlit as st
 st.set_page_config(page_title="二車複・二車単 必要オッズ表", layout="wide")
 
 st.title("二車複・二車単 必要オッズ表")
-st.caption("ヴェロビ評価順を入力して、二車複・二車単の必要オッズを車番に変換します。")
+st.caption("ヴェロビ評価順を入力して、二車複・二車単の必要オッズを車番に変換します。5〜7車対応。")
 
 TOTAL_N = 394
 
@@ -23,9 +23,21 @@ EXACTA_COUNT = {
 
 
 def normalize_rank_text(text: str) -> list[str]:
+    """
+    評価順テキストから1〜7の車番を抽出する。
+    5〜7車対応。
+    例：
+    41325   → ['4', '1', '3', '2', '5']
+    2715364 → ['2', '7', '1', '5', '3', '6', '4']
+    """
     nums = re.findall(r"[1-7]", text or "")
-    if len(nums) != 7 or len(set(nums)) != 7:
+
+    if len(nums) < 5 or len(nums) > 7:
         return []
+
+    if len(set(nums)) != len(nums):
+        return []
+
     return nums
 
 
@@ -77,7 +89,7 @@ def highlight_rank_pair(row):
     色分け：
     評価1-2              → 薄赤
     評価1-3 / 評価2-3   → 薄青
-    評価1-4 / 評価2-4
+    評価1-4 / 評価2-4   → 薄黄
     評価1-5 / 評価2-5   → 薄緑
     その他              → 白
     """
@@ -99,7 +111,10 @@ def highlight_rank_pair(row):
     if pair in [(1, 3), (2, 3)]:
         return ["background-color: #e8f1ff"] * len(row)  # 薄青
 
-    if pair in [(1, 4), (2, 4), (1, 5), (2, 5)]:
+    if pair in [(1, 4), (2, 4)]:
+        return ["background-color: #fff4cc"] * len(row)  # 薄黄
+
+    if pair in [(1, 5), (2, 5)]:
         return ["background-color: #eaf7f0"] * len(row)  # 薄緑
 
     return [""] * len(row)
@@ -110,11 +125,13 @@ def styled_df(df: pd.DataFrame):
 
 
 def make_quinella_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    n = len(cars)
+
     rank1_car = cars[0]
-    rank2_car = cars[1]
+    rank2_car = cars[1] if n >= 2 else None
 
     rank1_rows = []
-    for rank_b in range(2, 8):
+    for rank_b in range(2, n + 1):
         himo = cars[rank_b - 1]
         count = quinella_count(1, rank_b)
 
@@ -128,18 +145,19 @@ def make_quinella_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFra
         })
 
     rank2_rows = []
-    for rank_b in range(3, 8):
-        himo = cars[rank_b - 1]
-        count = quinella_count(2, rank_b)
+    if rank2_car is not None:
+        for rank_b in range(3, n + 1):
+            himo = cars[rank_b - 1]
+            count = quinella_count(2, rank_b)
 
-        rank2_rows.append({
-            "買い目": f"{rank2_car}={himo}",
-            "評価ペア": f"評価2-{rank_b}",
-            "回数": count,
-            "的中率": fmt_rate(count),
-            "必要オッズ": fmt_odds(count),
-            "_ヒモ車番": int(himo),
-        })
+            rank2_rows.append({
+                "買い目": f"{rank2_car}={himo}",
+                "評価ペア": f"評価2-{rank_b}",
+                "回数": count,
+                "的中率": fmt_rate(count),
+                "必要オッズ": fmt_odds(count),
+                "_ヒモ車番": int(himo),
+            })
 
     rank1_df = (
         pd.DataFrame(rank1_rows)
@@ -151,17 +169,20 @@ def make_quinella_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFra
         pd.DataFrame(rank2_rows)
         .sort_values("_ヒモ車番")
         .drop(columns=["_ヒモ車番"])
+        if rank2_rows else pd.DataFrame()
     )
 
     return rank1_df, rank2_df
 
 
 def make_exacta_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    n = len(cars)
+
     rank1_car = cars[0]
-    rank2_car = cars[1]
+    rank2_car = cars[1] if n >= 2 else None
 
     rank1_rows = []
-    for rank_b in range(2, 8):
+    for rank_b in range(2, n + 1):
         tail = cars[rank_b - 1]
         count = exacta_count(1, rank_b)
 
@@ -175,18 +196,21 @@ def make_exacta_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame
         })
 
     rank2_rows = []
-    for rank_b in [1, 3, 4, 5, 6, 7]:
-        tail = cars[rank_b - 1]
-        count = exacta_count(2, rank_b)
+    if rank2_car is not None:
+        tail_rank_list = [1] + list(range(3, n + 1))
 
-        rank2_rows.append({
-            "買い目": f"{rank2_car}-{tail}",
-            "評価方向": f"評価2→{rank_b}",
-            "回数": count,
-            "的中率": fmt_rate(count),
-            "必要オッズ": fmt_odds(count),
-            "_ヒモ車番": int(tail),
-        })
+        for rank_b in tail_rank_list:
+            tail = cars[rank_b - 1]
+            count = exacta_count(2, rank_b)
+
+            rank2_rows.append({
+                "買い目": f"{rank2_car}-{tail}",
+                "評価方向": f"評価2→{rank_b}",
+                "回数": count,
+                "的中率": fmt_rate(count),
+                "必要オッズ": fmt_odds(count),
+                "_ヒモ車番": int(tail),
+            })
 
     rank1_df = (
         pd.DataFrame(rank1_rows)
@@ -198,6 +222,7 @@ def make_exacta_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame
         pd.DataFrame(rank2_rows)
         .sort_values("_ヒモ車番")
         .drop(columns=["_ヒモ車番"])
+        if rank2_rows else pd.DataFrame()
     )
 
     return rank1_df, rank2_df
@@ -206,9 +231,9 @@ def make_exacta_axis_tables(cars: list[str]) -> tuple[pd.DataFrame, pd.DataFrame
 st.subheader("評価順を入力して計算")
 
 rank_text = st.text_input(
-    "ヴェロビ評価順（例：2715364）",
+    "ヴェロビ評価順（例：41325 / 2715364）",
     value="",
-    placeholder="2715364",
+    placeholder="41325",
 )
 
 calc = st.button("計算", type="primary")
@@ -217,7 +242,7 @@ if calc:
     cars = normalize_rank_text(rank_text)
 
     if not cars:
-        st.error("1〜7の車番を重複なく7つ入力してください。例：2715364")
+        st.error("1〜7の車番を重複なく5〜7つ入力してください。例：41325 / 2715364")
         st.stop()
 
     q_rank1_df, q_rank2_df = make_quinella_axis_tables(cars)
@@ -239,11 +264,12 @@ if calc:
 
     with col2:
         st.markdown(f"### 評価2位軸：{cars[1]}")
-        st.dataframe(
-            styled_df(q_rank2_df),
-            use_container_width=True,
-            hide_index=True,
-        )
+        if not q_rank2_df.empty:
+            st.dataframe(
+                styled_df(q_rank2_df),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     st.markdown("## 二車単 必要オッズ")
 
@@ -259,15 +285,16 @@ if calc:
 
     with col4:
         st.markdown(f"### 評価2位頭：{cars[1]}")
-        st.dataframe(
-            styled_df(e_rank2_df),
-            use_container_width=True,
-            hide_index=True,
-        )
+        if not e_rank2_df.empty:
+            st.dataframe(
+                styled_df(e_rank2_df),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     st.info(
-        "赤：評価1-2｜青：評価1-3・評価2-3｜緑：評価1-4・評価2-4・評価1-5・評価2-5。"
-        "二車複で必要オッズを超えた組み合わせを芯に、三連複は評価3〜5位をヒモ候補として見ます。"
+        "赤：評価1-2｜青：評価1-3・評価2-3｜黄：評価1-4・評価2-4｜緑：評価1-5・評価2-5。"
+        "二車複は必要オッズを超えた組み合わせを芯候補として確認します。"
     )
 
 else:
