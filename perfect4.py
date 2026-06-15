@@ -504,29 +504,42 @@ def pair13_combo_key(a: int, b: int) -> str:
     return f"{a}-{b}"
 
 
-def build_pair13_combo_table(pair13_counts: Dict[PairKey, int]) -> pd.DataFrame:
+def _pair13_combo_count(pair13_counts: Dict[PairKey, int], a: int, b: int) -> int:
+    """1着評価と3着評価の順不同ペア回数。前日入力が順不同、日次が方向付きでも合算できる形。"""
+    a, b = int(a), int(b)
+    if a == b:
+        return 0
+    return int(pair13_counts.get((a, b), 0)) + int(pair13_counts.get((b, a), 0))
+
+
+def build_pair13_combo_tables(pair13_counts: Dict[PairKey, int]) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    1着と3着の評価組み合わせ表。
-    方向付きの 1→3 着評価分布から、1-3 / 3-1 を同一ペアとして合算する。
+    1着と3着の評価組み合わせを、1→2着評価分布と同じ形式で出す。
+    行＝組み合わせの片方の評価、列＝相手評価。
+    例：行1・列3は、1着評価1/3着評価3 と 1着評価3/3着評価1 の合算。
+    Nは、その評価が1着=3着ペアの片方として出た総数。
     """
-    total = sum(int(v) for v in pair13_counts.values())
-    rows = []
-    for a in range(1, FIELD_SIZE + 1):
-        for b in range(a + 1, FIELD_SIZE + 1):
-            cnt = int(pair13_counts.get((a, b), 0)) + int(pair13_counts.get((b, a), 0))
-            rows.append({
-                "1着=3着ペア": f"{a}-{b}",
-                "回数": cnt,
-                "割合%": round(100.0 * cnt / total, 1) if total > 0 else None,
-                "内訳": f"{a}→{b}:{int(pair13_counts.get((a, b), 0))} / {b}→{a}:{int(pair13_counts.get((b, a), 0))}",
-            })
-    rows.append({
-        "1着=3着ペア": "総合",
-        "回数": total,
-        "割合%": 100.0 if total > 0 else None,
-        "内訳": "全1着→3着組み合わせ",
-    })
-    return pd.DataFrame(rows)
+    cols = list(range(1, FIELD_SIZE + 1))
+    count_rows = []
+    pct_rows = []
+
+    for a in cols:
+        total = sum(_pair13_combo_count(pair13_counts, a, b) for b in cols if b != a)
+        row_c = {"評価": a, "N": total}
+        row_p = {"評価": a, "N": total}
+        for b in cols:
+            col = str(b)
+            if b == a:
+                row_c[col] = None
+                row_p[col] = None
+            else:
+                cnt = _pair13_combo_count(pair13_counts, a, b)
+                row_c[col] = cnt
+                row_p[col] = round(100.0 * cnt / total, 1) if total > 0 else 0.0
+        count_rows.append(row_c)
+        pct_rows.append(row_p)
+
+    return pd.DataFrame(count_rows), pd.DataFrame(pct_rows)
 
 
 def new_payout_rec() -> Dict[str, int]:
@@ -2755,7 +2768,7 @@ agg_rank_manual: Dict[int, Dict[str, int]] = defaultdict(
 # 前日まで：1→2（評価）
 pair12_manual: Dict[PairKey, int] = defaultdict(int)
 
-# 前日まで：1→3（評価）
+# 前日まで：1着と3着の評価組み合わせ（順不同）
 pair13_manual: Dict[PairKey, int] = defaultdict(int)
 
 # 前日まで：新回収率
@@ -2765,7 +2778,7 @@ agg_payout_2t_pattern_manual: Dict[int, Dict[str, int]] = {
 }
 
 # 前日まで：個別回収（任意入力）
-# 1→2 / 1→3
+# 1→2 / 1着と3着組み合わせ
 agg_payout_axis_target_manual: Dict[Tuple[int, int], Dict[str, int]] = {
     (1, target): new_payout_rec() for target in INDIVIDUAL_AXIS1_TARGETS
 }
@@ -2917,29 +2930,22 @@ with tabs[1]:
 
         st.divider()
 
-        st.markdown("## 1→3 着評価分布（累積・回数）")
-        st.caption("1着が評価1〜7のとき、3着の評価の回数を入力。")
-
-        h13 = st.columns([1.8] + [1] * len(cols_12))
-        h13[0].markdown("**条件：1着の評価**")
-        for j, rr in enumerate(cols_12, start=1):
-            h13[j].markdown(f"**3着={rr}**")
+        st.markdown("## 1着と3着 評価組み合わせ（累積・順不同）")
+        st.caption("三連複判断用。1-3には、1着評価1・3着評価3 と 1着評価3・3着評価1 の両方を合算して入力します。")
 
         pair13_inputs = []
-        for wr in WINNER_RANKS:
-            row_cols = st.columns([1.8] + [1] * len(cols_12))
-            row_cols[0].write(f"評価{wr}が1着")
-            for j, rr in enumerate(cols_12, start=1):
-                if rr == wr:
-                    row_cols[j].write("")
-                    continue
-                v = row_cols[j].number_input(
-                    "",
-                    key=f"pair13_prev_wr{wr}_rr{rr}",
+        pair_list_13 = [(a, b) for a in range(1, FIELD_SIZE + 1) for b in range(a + 1, FIELD_SIZE + 1)]
+        for idx in range(0, len(pair_list_13), 3):
+            row_pairs = pair_list_13[idx:idx + 3]
+            cols = st.columns(3)
+            for c, (a, b) in zip(cols, row_pairs):
+                v = c.number_input(
+                    f"{a}-{b}",
+                    key=f"pair13_combo_prev_{a}_{b}",
                     min_value=0,
                     value=0,
                 )
-                pair13_inputs.append((wr, rr, int(v)))
+                pair13_inputs.append((a, b, int(v)))
 
         st.divider()
 
@@ -3212,7 +3218,7 @@ for row in byrace_rows:
                 rec["SUM"] += pay_2t
 
 # --- 個別（日次） ---
-# 2車単：1→2 / 1→3
+# 2車単：1→2 / 1着と3着組み合わせ
 INDIVIDUAL_PAIRS = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS]
 payout_axis_target_daily: Dict[Tuple[int, int], Dict[str, int]] = {
     pair: new_payout_rec() for pair in INDIVIDUAL_PAIRS
@@ -3506,21 +3512,15 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("1→3 着評価分布（全体累積）｜1着が評価1〜7のとき（欠車対応）")
-    st.caption("欠車レースでは存在しない下位評価はNに含まれません。")
+    st.subheader("1着と3着 評価組み合わせ（全体累積・順不同）｜1→2表と同形式")
+    st.caption("三連複判断用。例：1-3には、1着評価1・3着評価3 と 1着評価3・3着評価1 の両方を合算します。")
+    df13_combo_count, df13_combo_pct = build_pair13_combo_tables(pair13_total)
 
-    df13_count, df13_pct = build_conditional_tables_13(pair13_total)
-
-    st.markdown("### 回数（Nは条件付き総数）")
-    st.dataframe(df13_count, use_container_width=True, hide_index=True)
+    st.markdown("### 回数（Nはその評価が1着=3着ペアの片方として出た総数）")
+    st.dataframe(df13_combo_count, use_container_width=True, hide_index=True)
 
     st.markdown("### 割合%（同評価セルは空欄）")
-    st.dataframe(df13_pct, use_container_width=True, hide_index=True)
-
-    st.markdown("### 1着=3着 評価組み合わせ（順不同）")
-    st.caption("1→3だけでなく、1-3 と 3-1 を同一ペアとして合算します。三連複の軸候補確認用です。")
-    df13_combo = build_pair13_combo_table(pair13_total)
-    st.dataframe(df13_combo, use_container_width=True, hide_index=True)
+    st.dataframe(df13_combo_pct, use_container_width=True, hide_index=True)
 
     st.divider()
 
