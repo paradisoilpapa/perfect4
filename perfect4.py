@@ -29,7 +29,10 @@ PairKey = Tuple[int, int]
 
 
 def rank_symbol(r: int) -> str:
-    return f"評価{int(r)}"(a: int, b: int) -> str:
+    return f"評価{int(r)}"
+
+
+def nishafuku_label(a: int, b: int) -> str:
     a, b = sorted((int(a), int(b)))
     return f"2車複 {a}-{b}"
 
