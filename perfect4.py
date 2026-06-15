@@ -29,10 +29,7 @@ PairKey = Tuple[int, int]
 
 
 def rank_symbol(r: int) -> str:
-    return f"評価{int(r)}"
-
-
-def nishafuku_label(a: int, b: int) -> str:
+    return f"評価{int(r)}"(a: int, b: int) -> str:
     a, b = sorted((int(a), int(b)))
     return f"2車複 {a}-{b}"
 
@@ -147,7 +144,13 @@ def render_table(df: pd.DataFrame, height: int | None = None) -> None:
     if df is None or df.empty:
         st.info("表示するデータがありません。")
         return
-    st.dataframe(df, use_container_width=True, hide_index=True, height=height)
+
+    # Streamlit Cloudの新しめの環境では height=None を明示的に渡すと
+    # StreamlitInvalidHeightError になることがあるため、None の時は height 引数を渡さない。
+    if height is None:
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(df, use_container_width=True, hide_index=True, height=int(height))
 
 
 tabs = st.tabs(["日次手入力", "前日までの集計", "分析結果"])
