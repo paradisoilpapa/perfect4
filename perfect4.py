@@ -542,6 +542,46 @@ def build_pair13_combo_tables(pair13_counts: Dict[PairKey, int]) -> tuple[pd.Dat
     return pd.DataFrame(count_rows), pd.DataFrame(pct_rows)
 
 
+
+
+def _pair23_combo_count(pair23_counts: Dict[PairKey, int], a: int, b: int) -> int:
+    """2着評価と3着評価の順不同ペア回数。例：2着1・3着3 と 2着3・3着1 を合算。"""
+    a, b = int(a), int(b)
+    if a == b:
+        return 0
+    return int(pair23_counts.get((a, b), 0)) + int(pair23_counts.get((b, a), 0))
+
+
+def build_pair23_combo_tables(pair23_counts: Dict[PairKey, int]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    2着と3着の評価組み合わせを、1→2着評価分布と同じ形式で出す。
+    行＝組み合わせの片方の評価、列＝相手評価。
+    例：行1・列3は、2着評価1/3着評価3 と 2着評価3/3着評価1 の合算。
+    Nは、その評価が2着=3着ペアの片方として出た総数。
+    """
+    cols = list(range(1, FIELD_SIZE + 1))
+    count_rows = []
+    pct_rows = []
+
+    for a in cols:
+        total = sum(_pair23_combo_count(pair23_counts, a, b) for b in cols if b != a)
+        row_c = {"評価": a, "N": total}
+        row_p = {"評価": a, "N": total}
+        for b in cols:
+            col = str(b)
+            if b == a:
+                row_c[col] = None
+                row_p[col] = None
+            else:
+                cnt = _pair23_combo_count(pair23_counts, a, b)
+                row_c[col] = cnt
+                row_p[col] = round(100.0 * cnt / total, 1) if total > 0 else 0.0
+        count_rows.append(row_c)
+        pct_rows.append(row_p)
+
+    return pd.DataFrame(count_rows), pd.DataFrame(pct_rows)
+
+
 def new_payout_rec() -> Dict[str, int]:
     # Z3   : 的中払戻 〜3.0倍（〜300円）
     # Z6   : 的中払戻 3.1〜6.0倍（310〜600円）
@@ -2771,6 +2811,9 @@ pair12_manual: Dict[PairKey, int] = defaultdict(int)
 # 前日まで：1着と3着の評価組み合わせ（順不同）
 pair13_manual: Dict[PairKey, int] = defaultdict(int)
 
+# 前日まで：2着と3着の評価組み合わせ（順不同）
+pair23_manual: Dict[PairKey, int] = defaultdict(int)
+
 # 前日まで：新回収率
 # 2車単：1→23
 agg_payout_2t_pattern_manual: Dict[int, Dict[str, int]] = {
@@ -2958,6 +3001,32 @@ with tabs[1]:
 
         st.divider()
 
+        st.markdown("## 2着と3着 評価組み合わせ（累積・順不同）")
+        st.caption("1→2着評価分布と同じ表形式。順不同なので右上セルだけ入力します。左下セルは同じ組み合わせのため空欄表示です。")
+
+        pair23_inputs = []
+        h23 = st.columns([1.8] + [1] * FIELD_SIZE)
+        h23[0].markdown("**評価**")
+        for j in range(1, FIELD_SIZE + 1):
+            h23[j].markdown(f"**{j}**")
+
+        for a in range(1, FIELD_SIZE + 1):
+            row_cols = st.columns([1.8] + [1] * FIELD_SIZE)
+            row_cols[0].write(f"評価{a}")
+            for j, b in enumerate(range(1, FIELD_SIZE + 1), start=1):
+                if b == a:
+                    row_cols[j].write("")
+                elif b < a:
+                    row_cols[j].write("")
+                else:
+                    v = row_cols[j].number_input(
+                        "",
+                        key=f"pair23_combo_prev_{a}_{b}",
+                        min_value=0,
+                        value=0,
+                    )
+                    pair23_inputs.append((a, b, int(v)))
+
         st.markdown("## 評価別 入賞回数（累積）")
         st.caption("評価1～7まで入力。Nは各評価が存在したレース数。")
 
@@ -3042,6 +3111,10 @@ with tabs[1]:
     for wr, rr, v in pair13_inputs:
         if v:
             pair13_manual[(wr, rr)] += int(v)
+
+    for wr, rr, v in pair23_inputs:
+        if v:
+            pair23_manual[(wr, rr)] += int(v)
 
     for r, N, C1, C2, C3 in rank_inputs:
         if any([N, C1, C2, C3]):
@@ -3153,6 +3226,7 @@ for r, rec in agg_rank_manual.items():
 
 pair12_daily: Dict[PairKey, int] = defaultdict(int)
 pair13_daily: Dict[PairKey, int] = defaultdict(int)
+pair23_daily: Dict[PairKey, int] = defaultdict(int)
 
 for row in byrace_rows:
     vorder = row.get("vorder", [])
@@ -3173,6 +3247,7 @@ for row in byrace_rows:
         third_rank = car_to_rank.get(finish[2])
         if third_rank is not None:
             pair13_daily[(int(win_rank), int(third_rank))] += 1
+            pair23_daily[(int(sec_rank), int(third_rank))] += 1
 
 pair12_total: Dict[PairKey, int] = defaultdict(int)
 for k, v in pair12_daily.items():
@@ -3185,6 +3260,12 @@ for k, v in pair13_daily.items():
     pair13_total[k] += int(v)
 for k, v in pair13_manual.items():
     pair13_total[k] += int(v)
+
+pair23_total: Dict[PairKey, int] = defaultdict(int)
+for k, v in pair23_daily.items():
+    pair23_total[k] += int(v)
+for k, v in pair23_manual.items():
+    pair23_total[k] += int(v)
 
 # --- 新回収率（日次） ---
 # 2車単：1→23
@@ -3530,6 +3611,18 @@ with tabs[2]:
 
     st.markdown("### 割合%（同評価セルは空欄）")
     st.dataframe(df13_combo_pct, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    st.subheader("2着と3着 評価組み合わせ（全体累積・順不同）｜1→2表と同形式")
+    st.caption("三連複判断用。例：2-3には、2着評価2・3着評価3 と 2着評価3・3着評価2 の両方を合算します。")
+    df23_combo_count, df23_combo_pct = build_pair23_combo_tables(pair23_total)
+
+    st.markdown("### 回数（Nはその評価が2着=3着ペアの片方として出た総数）")
+    st.dataframe(df23_combo_count, use_container_width=True, hide_index=True)
+
+    st.markdown("### 割合%（同評価セルは空欄）")
+    st.dataframe(df23_combo_pct, use_container_width=True, hide_index=True)
 
     st.divider()
 
