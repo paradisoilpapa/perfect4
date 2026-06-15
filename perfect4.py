@@ -421,6 +421,50 @@ def zone_total_row(recs: List[Dict[str, int]]) -> Dict:
     }
 
 
+ZONE_DISPLAY_COLS = ["〜3倍", "3.1〜6倍", "6.1〜10倍", "10.1〜20倍", "20.1倍〜"]
+
+
+def _zone_count_from_text(value) -> int:
+    """'27/84.4%' の左側本数だけ取り出す。"""
+    try:
+        s = str(value).strip()
+        if "/" in s:
+            s = s.split("/", 1)[0]
+        return int(float(s))
+    except Exception:
+        return 0
+
+
+def highlight_zone_max(row: pd.Series) -> pd.Series:
+    """各ペアごとに、的中本数が最も多いゾーンを薄い青で表示する。"""
+    styles = pd.Series("", index=row.index)
+    counts = {col: _zone_count_from_text(row.get(col, 0)) for col in ZONE_DISPLAY_COLS if col in row.index}
+    if not counts:
+        return styles
+    max_count = max(counts.values())
+    if max_count <= 0:
+        return styles
+    for col, cnt in counts.items():
+        if cnt == max_count:
+            styles[col] = "background-color: #e3f2fd; font-weight: 600;"
+    return styles
+
+
+def render_zone_table(df: pd.DataFrame, height: int | None = None) -> None:
+    """的中ゾーン分布専用。行ごとの最多ゾーンを薄い青で塗る。"""
+    if df is None or df.empty:
+        st.info("表示するデータがありません。")
+        return
+    h = height if height is not None else table_auto_height(df)
+    styled = df.style.apply(highlight_zone_max, axis=1)
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+        height=h,
+    )
+
+
 def build_conditional_tables_13(pair_counts: Dict[PairKey, int]) -> tuple[pd.DataFrame, pd.DataFrame]:
     cols = list(range(1, FIELD_SIZE + 1))
     count_rows = []
@@ -3507,7 +3551,7 @@ with tabs[2]:
     zone_rows.append(zone_total_row(zone_recs))
     df_zone = pd.DataFrame(zone_rows)
     zone_cols = ["ペア", "的中H", "〜3倍", "3.1〜6倍", "6.1〜10倍", "10.1〜20倍", "20.1倍〜", "ゾーン確認"]
-    render_sortable_table(df_zone[[c for c in zone_cols if c in df_zone.columns]])
+    render_zone_table(df_zone[[c for c in zone_cols if c in df_zone.columns]])
 
     st.divider()
 
