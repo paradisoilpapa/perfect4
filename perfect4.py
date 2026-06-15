@@ -20,10 +20,9 @@ INDIVIDUAL_AXIS1_TARGETS = (2, 3)
 AXIS2_TARGETS = ()
 AXIS3_TARGETS = ()
 
-# 2車複：軸1・2限定の標準棚 + 穴棚
-# 標準棚：1-234 / 2-134
-# 穴棚：  1-567 / 2-567
-# 評価3は軸ではなく相手候補として扱います。
+# 2車複：個別引継ぎ用ペア。
+# 既存の1軸・2軸に加えて、評価3軸・評価4軸の下位絡みを検証するため、
+# 3-4/5/6/7 と 4-5/6/7 も累積対象に入れます。
 NISHAFUKU_PAIRS = [
     # 軸1に必要なペア
     (1, 2), (1, 3), (1, 4),
@@ -32,6 +31,10 @@ NISHAFUKU_PAIRS = [
     # 軸2に必要なペア
     (2, 3), (2, 4),
     (2, 5), (2, 6), (2, 7),
+
+    # 評価3軸・4軸の追加検証ペア
+    (3, 4), (3, 5), (3, 6), (3, 7),
+    (4, 5), (4, 6), (4, 7),
 ]
 NISHAFUKU_EXTRA_PAIRS = []
 
@@ -1103,6 +1106,53 @@ def expected_pair_hit_rate_from_pair12(a: int, b: int, pair12_counts: Dict[PairK
         return None
     hit = int(pair12_counts.get((a, b), 0)) + int(pair12_counts.get((b, a), 0))
     return round(100.0 * hit / total, 1)
+
+
+def nishafuku_individual_row(label: str, rec: Dict[str, int], pair12_counts: Dict[PairKey, int]) -> Dict:
+    """個別2車複の累積表示行。3軸・4軸追加ペアも同じ形式で見る。"""
+    row = payout_row(label, rec)
+    pair_part = label.replace("2車複", "").strip()
+    row["ペアキー"] = pair_part
+
+    try:
+        a, b = [int(x) for x in pair_part.split("-")]
+    except Exception:
+        a = b = None
+
+    # 1-2〜2-7は小倉固定基準、追加した3-4以降は1→2着分布からの累積想定率を使う。
+    exp_rate = PAIR_BASE_HIT_RATE_DEFAULTS.get(pair_part)
+    if exp_rate is None and a is not None and b is not None:
+        exp_rate = expected_pair_hit_rate_from_pair12(a, b, pair12_counts)
+
+    exp_avg_pay = PAIR_BASE_AVG_PAY_DEFAULTS.get(pair_part)
+    exp_roi = round(float(exp_rate) * float(exp_avg_pay) / 100.0, 1) if exp_rate is not None and exp_avg_pay else None
+
+    row["想定ペア的%"] = exp_rate
+    row["ペア基準配当"] = exp_avg_pay
+    row["想定回収率%"] = exp_roi
+
+    hit_rate = row.get("的中率%")
+    avg_pay = row.get("平均配当")
+    roi = row.get("回収率%")
+
+    if hit_rate is not None and pd.notna(hit_rate) and exp_rate is not None:
+        row["想定差"] = round(float(hit_rate) - float(exp_rate), 1)
+    else:
+        row["想定差"] = None
+
+    if avg_pay is not None and pd.notna(avg_pay) and exp_avg_pay:
+        row["配当係数"] = round(float(avg_pay) / float(exp_avg_pay), 2)
+        row["平均配当差"] = round(float(avg_pay) - float(exp_avg_pay), 1)
+    else:
+        row["配当係数"] = None
+        row["平均配当差"] = None
+
+    if roi is not None and pd.notna(roi) and exp_roi is not None:
+        row["回収差"] = round(float(roi) - float(exp_roi), 1)
+    else:
+        row["回収差"] = None
+
+    return row
 
 
 def diff_status(diff, expected=None) -> str:
@@ -2525,7 +2575,7 @@ agg_payout_axis_target_manual: Dict[Tuple[int, int], Dict[str, int]] = {
     (1, target): new_payout_rec() for target in INDIVIDUAL_AXIS1_TARGETS
 }
 
-# 前日まで：2車複 1-23 + 5-12
+# 前日まで：個別2車複（1・2軸＋3・4軸追加検証）
 agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
     nishafuku_label(a, b): new_payout_rec() for a, b in NISHAFUKU_PAIRS
 }
@@ -2694,11 +2744,32 @@ with tabs[1]:
 
         st.divider()
 
-        # ここでは 123-123-4 / 124-124-3 比較に必要な
-        # 1→2着評価分布と評価別入賞回数だけを入力します。
+        st.divider()
+
+        st.markdown("## 個別2車複 引継ぎ入力（累積）")
+        st.caption(
+            "対象N・払戻合計SUM・的中Hを入力。KSUMは対象Nと同じ1点扱いで自動計算します。"
+            "今回から3-4/3-5/3-6/3-7、4-5/4-6/4-7も追加しています。"
+        )
+        hdr_nf = st.columns([1.4, 1, 1.4, 1])
+        hdr_nf[0].markdown("**型**")
+        hdr_nf[1].markdown("**対象N**")
+        hdr_nf[2].markdown("**払戻合計SUM**")
+        hdr_nf[3].markdown("**的中H**")
+
+        nishafuku_pair_inputs = []
+        for a, b in NISHAFUKU_PAIRS:
+            label = nishafuku_label(a, b)
+            key_base = f"nishafuku_prev_{a}_{b}"
+            c0, c1, c2, c3 = st.columns([1.4, 1, 1.4, 1])
+            c0.write(label)
+            N = c1.number_input("", key=f"{key_base}_N", min_value=0, value=0)
+            SUM = c2.number_input("", key=f"{key_base}_SUM", min_value=0, value=0, step=10)
+            H = c3.number_input("", key=f"{key_base}_H", min_value=0, value=0)
+            nishafuku_pair_inputs.append((label, int(N), int(SUM), int(H)))
+
         # 既存処理との互換用に空リストだけ残します。
         payout_inputs = []
-        nishafuku_pair_inputs = []
         sanrenpuku12_inputs = []
         sanrenpuku12_individual_inputs = []
         nishafuku_set_inputs = []
@@ -3175,6 +3246,37 @@ with tabs[2]:
             }
         )
     st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    st.subheader("個別2車複 引継ぎ用累積表")
+    st.caption(
+        "1・2軸に加え、評価3軸・評価4軸の追加検証として "
+        "3-4/3-5/3-6/3-7、4-5/4-6/4-7 を同じ表に追加しています。"
+    )
+    df_nishafuku_individual = pd.DataFrame([
+        nishafuku_individual_row(nishafuku_label(a, b), payout_nishafuku_total[nishafuku_label(a, b)], pair12_total)
+        for a, b in NISHAFUKU_PAIRS
+        if nishafuku_label(a, b) in payout_nishafuku_total
+    ])
+    cols_nishafuku_individual = [
+        "型",
+        "ペアキー",
+        "対象N",
+        "払戻合計SUM",
+        "的中H",
+        "的中率%",
+        "平均配当",
+        "ペア基準配当",
+        "想定ペア的%",
+        "想定回収率%",
+        "回収率%",
+        "想定差",
+        "回収差",
+    ]
+    render_sortable_table(
+        df_nishafuku_individual[[c for c in cols_nishafuku_individual if c in df_nishafuku_individual.columns]]
+    )
 
     st.divider()
 
