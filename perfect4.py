@@ -1007,6 +1007,11 @@ NISHAFUKU_3412_SOURCE_LABELS = [
     nishafuku_label(2, 4),
 ]
 
+# 推奨流れ1-2ワイド集計から、1-2-全三連複の必要合成オッズを出すための固定値。
+# サイドバー入力ではなく、既存の全体累積表から自動集計します。
+WIDE12_TARGET_EV = 1.10
+WIDE12_SAFETY_FACTOR = 1.15
+
 
 def ksum_nishafuku_3412(field_n: int) -> int:
     """34-12 2車複フォメの点数。推奨流れの1～4番手が存在する時だけ4点。"""
@@ -3697,39 +3702,91 @@ with tabs[2]:
 
     st.divider()
 
-    st.markdown("### 123-123-4 / 124-124-3 三連複3点｜推定集計ゾーン")
+    st.markdown("### 推奨流れ1-2ワイド集計｜切替オッズ判定")
     st.caption(
-        "実三連複配当は入力しません。既存の1→2着評価分布と評価別3着回数から、"
-        "123-123-4 と 124-124-3 の3点的中数を条件付き按分で推定します。"
-        "金額・払戻・回収率は出しません。日次入力分だけは実着順から的中Hを出します。"
+        "既存の3集計表から、推奨流れ1番手・2番手が3着以内に一緒に入った回数を自動集計します。"
+        "手入力欄やサイドバー入力は使いません。"
     )
 
-    trio_1231234_est = estimate_trio_1231234_from_pair12_and_rank(pair12_total, rank_total)
-    trio_1241243_est = estimate_trio_1241243_from_pair12_and_rank(pair12_total, rank_total)
-    rec_trio_1231234_daily = payout_trio_1231234_daily.get(TRIO_1231234_LABEL, new_payout_rec())
-    rec_trio_1241243_daily = payout_trio_1241243_daily.get(TRIO_1241243_LABEL, new_payout_rec())
-    df_trio_1231234 = pd.DataFrame([
-        trio_1231234_daily_row(rec_trio_1231234_daily),
-        {k: v for k, v in trio_1231234_est.items() if k != "detail_rows"},
-        trio_1241243_daily_row(rec_trio_1241243_daily),
-        {k: v for k, v in trio_1241243_est.items() if k != "detail_rows"},
+    wide12_1st_2nd_12 = int(pair12_total.get((1, 2), 0))
+    wide12_1st_2nd_21 = int(pair12_total.get((2, 1), 0))
+    wide12_1st_2nd = wide12_1st_2nd_12 + wide12_1st_2nd_21
+    wide12_1st_3rd = int(_pair13_combo_count(pair13_total, 1, 2))
+    wide12_2nd_3rd = int(_pair23_combo_count(pair23_total, 1, 2))
+    wide12_hit = wide12_1st_2nd + wide12_1st_3rd + wide12_2nd_3rd
+
+    wide12_total_races = int(sum(int(v) for v in pair12_total.values()))
+    wide12_rate = (wide12_hit / wide12_total_races) if wide12_total_races > 0 else 0.0
+
+    if wide12_rate > 0:
+        wide12_break_even_odds = 1.00 / wide12_rate
+        wide12_ev_required_odds = WIDE12_TARGET_EV / wide12_rate
+        wide12_recommended_min_odds = wide12_ev_required_odds * WIDE12_SAFETY_FACTOR
+    else:
+        wide12_break_even_odds = None
+        wide12_ev_required_odds = None
+        wide12_recommended_min_odds = None
+
+    df_wide12_summary = pd.DataFrame([
+        {
+            "項目": "1着-2着 1-2",
+            "回数": wide12_1st_2nd,
+            "内訳": f"1→2={wide12_1st_2nd_12} / 2→1={wide12_1st_2nd_21}",
+        },
+        {
+            "項目": "1着-3着 1-2",
+            "回数": wide12_1st_3rd,
+            "内訳": "1着と3着 評価組み合わせ表の1-2",
+        },
+        {
+            "項目": "2着-3着 1-2",
+            "回数": wide12_2nd_3rd,
+            "内訳": "2着と3着 評価組み合わせ表の1-2",
+        },
+        {
+            "項目": "推奨流れ1-2ワイド的中数",
+            "回数": wide12_hit,
+            "内訳": f"{wide12_1st_2nd} + {wide12_1st_3rd} + {wide12_2nd_3rd}",
+        },
     ])
-    cols_trio_1231234 = [
-        "型",
-        "構成",
-        "対象N",
-        "総点数KSUM",
-        "的中H",
-        "的中率%",
-        "推定H",
-        "推定的中率%",
-    ]
-    render_sortable_table(df_trio_1231234[[c for c in cols_trio_1231234 if c in df_trio_1231234.columns]])
+    st.dataframe(df_wide12_summary, use_container_width=True, hide_index=True)
 
-    if trio_1231234_est.get("detail_rows"):
-        with st.expander("123-123-4 推定内訳（1→2着ペア別）", expanded=False):
-            render_sortable_table(pd.DataFrame(trio_1231234_est["detail_rows"]))
+    df_wide12_odds = pd.DataFrame([
+        {
+            "項目": "総レース数",
+            "値": f"{wide12_total_races}R",
+        },
+        {
+            "項目": "推奨流れ1-2ワイド的中率",
+            "値": f"{round(wide12_rate * 100.0, 1)}%" if wide12_total_races > 0 else "—",
+        },
+        {
+            "項目": "目標EV",
+            "値": f"{WIDE12_TARGET_EV:.2f}",
+        },
+        {
+            "項目": "安全係数",
+            "値": f"{WIDE12_SAFETY_FACTOR:.2f}",
+        },
+        {
+            "項目": "損益分岐合成オッズ",
+            "値": f"約{wide12_break_even_odds:.2f}倍" if wide12_break_even_odds is not None else "—",
+        },
+        {
+            "項目": f"EV{WIDE12_TARGET_EV:.2f}必要合成オッズ",
+            "値": f"約{wide12_ev_required_odds:.2f}倍" if wide12_ev_required_odds is not None else "—",
+        },
+        {
+            "項目": "安全係数込み 推奨下限合成オッズ",
+            "値": f"約{wide12_recommended_min_odds:.2f}倍" if wide12_recommended_min_odds is not None else "—",
+        },
+    ])
+    st.dataframe(df_wide12_odds, use_container_width=True, hide_index=True)
 
-    if trio_1241243_est.get("detail_rows"):
-        with st.expander("124-124-3 推定内訳（1→2着ペア別）", expanded=False):
-            render_sortable_table(pd.DataFrame(trio_1241243_est["detail_rows"]))
+    if wide12_recommended_min_odds is not None:
+        st.info(
+            f"推奨流れ1-2-全 三連複は、合成実効オッズが約{wide12_recommended_min_odds:.2f}倍以上なら優先候補。"
+            "これ未満なら、推奨流れ34-12 2車複フォメへの切替を検討。"
+        )
+    else:
+        st.warning("推奨流れ1-2ワイド的中率が0%のため、必要合成オッズを計算できません。")
