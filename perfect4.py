@@ -393,6 +393,31 @@ def zone_row(pair: str, rec: Dict[str, int]) -> Dict:
     }
 
 
+def zone_total_row(recs: List[Dict[str, int]]) -> Dict:
+    """個別2車複 的中ゾーン分布の総合行。全ペアの的中Hを合算して比率を出す。"""
+    total = new_payout_rec()
+    for rec in recs:
+        for k in ("H", "Z3", "Z6", "Z10", "Z20", "Z20P"):
+            total[k] = int(total.get(k, 0)) + int(rec.get(k, 0))
+    H = int(total.get("H", 0))
+    z3 = int(total.get("Z3", 0))
+    z6 = int(total.get("Z6", 0))
+    z10 = int(total.get("Z10", 0))
+    z20 = int(total.get("Z20", 0))
+    z20p = int(total.get("Z20P", 0))
+    zsum = z3 + z6 + z10 + z20 + z20p
+    return {
+        "ペア": "総合",
+        "的中H": H,
+        "〜3倍": zone_text(z3, H),
+        "3.1〜6倍": zone_text(z6, H),
+        "6.1〜10倍": zone_text(z10, H),
+        "10.1〜20倍": zone_text(z20, H),
+        "20.1倍〜": zone_text(z20p, H),
+        "ゾーン確認": "OK" if (H == 0 or zsum == H) else f"不一致({zsum}/{H})",
+    }
+
+
 def build_conditional_tables_13(pair_counts: Dict[PairKey, int]) -> tuple[pd.DataFrame, pd.DataFrame]:
     cols = list(range(1, FIELD_SIZE + 1))
     count_rows = []
@@ -3466,11 +3491,18 @@ with tabs[2]:
 
     st.subheader("個別2車複 的中ゾーン分布")
     st.caption("的中時の払戻倍率帯。累積表とは独立表示にして、文字が小さくならないようにしています。")
-    df_zone = pd.DataFrame([
+    zone_recs = [
+        payout_nishafuku_total[nishafuku_label(a, b)]
+        for a, b in NISHAFUKU_PAIRS
+        if nishafuku_label(a, b) in payout_nishafuku_total
+    ]
+    zone_rows = [
         zone_row(f"{a}-{b}", payout_nishafuku_total[nishafuku_label(a, b)])
         for a, b in NISHAFUKU_PAIRS
         if nishafuku_label(a, b) in payout_nishafuku_total
-    ])
+    ]
+    zone_rows.append(zone_total_row(zone_recs))
+    df_zone = pd.DataFrame(zone_rows)
     zone_cols = ["ペア", "的中H", "〜3倍", "3.1〜6倍", "6.1〜10倍", "10.1〜20倍", "20.1倍〜", "ゾーン確認"]
     render_sortable_table(df_zone[[c for c in zone_cols if c in df_zone.columns]])
 
