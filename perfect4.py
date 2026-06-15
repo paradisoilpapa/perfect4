@@ -143,17 +143,27 @@ def payout_row(label: str, rec: Dict[str, int]) -> Dict:
     }
 
 
+def table_auto_height(df: pd.DataFrame, row_px: int = 35, header_px: int = 38, pad_px: int = 12, min_px: int = 120) -> int:
+    """行数に合わせてdataframeの高さを出す。縦スクロールを出しにくくする。"""
+    if df is None:
+        return min_px
+    try:
+        n = max(1, len(df))
+    except Exception:
+        n = 1
+    return max(min_px, int(header_px + row_px * n + pad_px))
+
+
 def render_table(df: pd.DataFrame, height: int | None = None) -> None:
     if df is None or df.empty:
         st.info("表示するデータがありません。")
         return
 
-    # Streamlit Cloudの新しめの環境では height=None を明示的に渡すと
-    # StreamlitInvalidHeightError になることがあるため、None の時は height 引数を渡さない。
-    if height is None:
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.dataframe(df, use_container_width=True, hide_index=True, height=int(height))
+    # height=Noneを渡すとCloud環境でエラーになることがある。
+    # さらに、デフォルト表示だと表の中に縦スクロールが出るため、
+    # 行数から高さを自動計算して全行を見せる。
+    h = table_auto_height(df) if height is None else int(height)
+    st.dataframe(df, use_container_width=True, hide_index=True, height=h)
 
 
 tabs = st.tabs(["日次手入力", "前日までの集計", "分析結果"])
