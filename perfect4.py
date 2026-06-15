@@ -2931,21 +2931,30 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 1着と3着 評価組み合わせ（累積・順不同）")
-        st.caption("三連複判断用。1-3には、1着評価1・3着評価3 と 1着評価3・3着評価1 の両方を合算して入力します。")
+        st.caption("1→2着評価分布と同じ表形式。順不同なので右上セルだけ入力します。左下セルは同じ組み合わせのため空欄表示です。")
 
         pair13_inputs = []
-        pair_list_13 = [(a, b) for a in range(1, FIELD_SIZE + 1) for b in range(a + 1, FIELD_SIZE + 1)]
-        for idx in range(0, len(pair_list_13), 3):
-            row_pairs = pair_list_13[idx:idx + 3]
-            cols = st.columns(3)
-            for c, (a, b) in zip(cols, row_pairs):
-                v = c.number_input(
-                    f"{a}-{b}",
-                    key=f"pair13_combo_prev_{a}_{b}",
-                    min_value=0,
-                    value=0,
-                )
-                pair13_inputs.append((a, b, int(v)))
+        h13 = st.columns([1.8] + [1] * FIELD_SIZE)
+        h13[0].markdown("**評価**")
+        for j in range(1, FIELD_SIZE + 1):
+            h13[j].markdown(f"**{j}**")
+
+        for a in range(1, FIELD_SIZE + 1):
+            row_cols = st.columns([1.8] + [1] * FIELD_SIZE)
+            row_cols[0].write(f"評価{a}")
+            for j, b in enumerate(range(1, FIELD_SIZE + 1), start=1):
+                if b == a:
+                    row_cols[j].write("")
+                elif b < a:
+                    row_cols[j].write("")
+                else:
+                    v = row_cols[j].number_input(
+                        "",
+                        key=f"pair13_combo_prev_{a}_{b}",
+                        min_value=0,
+                        value=0,
+                    )
+                    pair13_inputs.append((a, b, int(v)))
 
         st.divider()
 
