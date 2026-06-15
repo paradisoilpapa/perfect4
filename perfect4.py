@@ -182,7 +182,7 @@ agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
 # A. 日次手入力
 # =========================
 with tabs[0]:
-    st.subheader("日次手入力（7車ベース・欠車対応・最大36R）")
+    st.subheader("日次手入力（7車ベース・欠車対応・最大100R）")
     st.caption("V評価は頭数ぶんの桁数で入力。着順は3桁まで。2車複払戻のみ入力します。")
 
     with st.form("daily_input_form"):
@@ -194,7 +194,7 @@ with tabs[0]:
         cols_hdr[4].markdown("**2車複払戻**")
 
         daily_inputs = []
-        for i in range(1, 37):
+        for i in range(1, 101):
             c1, c2, c3, c4, c5 = st.columns([0.7, 0.8, 2.8, 1.0, 1.0])
             rid = c1.text_input("", key=f"rid_{i}", value=str(i))
             field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
