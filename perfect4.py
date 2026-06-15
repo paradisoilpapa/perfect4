@@ -494,6 +494,41 @@ def build_conditional_tables_13(pair_counts: Dict[PairKey, int]) -> tuple[pd.Dat
     return pd.DataFrame(count_rows), pd.DataFrame(pct_rows)
 
 
+
+
+def pair13_combo_key(a: int, b: int) -> str:
+    """1着評価と3着評価の組み合わせを順不同キーにする。例：1→3 と 3→1 はどちらも 1-3。"""
+    a, b = sorted((int(a), int(b)))
+    if a == b:
+        return ""
+    return f"{a}-{b}"
+
+
+def build_pair13_combo_table(pair13_counts: Dict[PairKey, int]) -> pd.DataFrame:
+    """
+    1着と3着の評価組み合わせ表。
+    方向付きの 1→3 着評価分布から、1-3 / 3-1 を同一ペアとして合算する。
+    """
+    total = sum(int(v) for v in pair13_counts.values())
+    rows = []
+    for a in range(1, FIELD_SIZE + 1):
+        for b in range(a + 1, FIELD_SIZE + 1):
+            cnt = int(pair13_counts.get((a, b), 0)) + int(pair13_counts.get((b, a), 0))
+            rows.append({
+                "1着=3着ペア": f"{a}-{b}",
+                "回数": cnt,
+                "割合%": round(100.0 * cnt / total, 1) if total > 0 else None,
+                "内訳": f"{a}→{b}:{int(pair13_counts.get((a, b), 0))} / {b}→{a}:{int(pair13_counts.get((b, a), 0))}",
+            })
+    rows.append({
+        "1着=3着ペア": "総合",
+        "回数": total,
+        "割合%": 100.0 if total > 0 else None,
+        "内訳": "全1着→3着組み合わせ",
+    })
+    return pd.DataFrame(rows)
+
+
 def new_payout_rec() -> Dict[str, int]:
     # Z3   : 的中払戻 〜3.0倍（〜300円）
     # Z6   : 的中払戻 3.1〜6.0倍（310〜600円）
@@ -3481,6 +3516,11 @@ with tabs[2]:
 
     st.markdown("### 割合%（同評価セルは空欄）")
     st.dataframe(df13_pct, use_container_width=True, hide_index=True)
+
+    st.markdown("### 1着=3着 評価組み合わせ（順不同）")
+    st.caption("1→3だけでなく、1-3 と 3-1 を同一ペアとして合算します。三連複の軸候補確認用です。")
+    df13_combo = build_pair13_combo_table(pair13_total)
+    st.dataframe(df13_combo, use_container_width=True, hide_index=True)
 
     st.divider()
 
