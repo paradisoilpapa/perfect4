@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複ゾーン追加・フルコード版")
+st.title("ヴェロビ 復習（全体累積）｜前日累積反映修正版・フルコード版")
 
 # =========================
 # 基本設定（7車ベース）
@@ -3101,11 +3101,106 @@ with tabs[1]:
             Z20P = c5.number_input("", key=f"{key_base}_Z20P", min_value=0, value=0)
             nishafuku_zone_inputs.append((label, int(Z3), int(Z6), int(Z10), int(Z20), int(Z20P)))
 
-        # 既存処理との互換用に空リストだけ残します。
+        st.divider()
+
+        st.markdown("## 2車単 固定型 引継ぎ入力（累積）")
+        st.caption("対象N・総点数KSUM・払戻合計SUM・的中Hを入力。例：2車単 1→23 は通常1Rあたり2点です。")
+        hdr_2t = st.columns([1.6, 1, 1, 1.4, 1])
+        hdr_2t[0].markdown("**型**")
+        hdr_2t[1].markdown("**対象N**")
+        hdr_2t[2].markdown("**総点数KSUM**")
+        hdr_2t[3].markdown("**払戻合計SUM**")
+        hdr_2t[4].markdown("**的中H**")
+
         payout_inputs = []
+        for axis in PATTERN_AXES:
+            label = pattern_label(axis)
+            c0, c1, c2, c3, c4 = st.columns([1.6, 1, 1, 1.4, 1])
+            c0.write(label)
+            N = c1.number_input("", key=f"prev_2t_pattern_{axis}_N", min_value=0, value=0)
+            default_ksum = int(N) * max(1, len(targets_for_pattern(axis, FIELD_SIZE))) if int(N) > 0 else 0
+            KSUM = c2.number_input("", key=f"prev_2t_pattern_{axis}_KSUM", min_value=0, value=default_ksum)
+            SUM = c3.number_input("", key=f"prev_2t_pattern_{axis}_SUM", min_value=0, value=0, step=10)
+            H = c4.number_input("", key=f"prev_2t_pattern_{axis}_H", min_value=0, value=0)
+            payout_inputs.append((axis, int(N), int(KSUM), int(SUM), int(H)))
+
+        st.markdown("## 個別2車単 引継ぎ入力（累積）")
+        st.caption("対象N・払戻合計SUM・的中Hを入力。KSUMは対象Nと同じ1点扱いで自動計算します。")
+        hdr_2t_ind = st.columns([1.6, 1, 1.4, 1])
+        hdr_2t_ind[0].markdown("**型**")
+        hdr_2t_ind[1].markdown("**対象N**")
+        hdr_2t_ind[2].markdown("**払戻合計SUM**")
+        hdr_2t_ind[3].markdown("**的中H**")
+
+        axis_target_inputs = []
+        for axis, target in [(1, t) for t in INDIVIDUAL_AXIS1_TARGETS]:
+            label = pair_target_label(axis, target)
+            c0, c1, c2, c3 = st.columns([1.6, 1, 1.4, 1])
+            c0.write(label)
+            N = c1.number_input("", key=f"prev_2t_ind_{axis}_{target}_N", min_value=0, value=0)
+            SUM = c2.number_input("", key=f"prev_2t_ind_{axis}_{target}_SUM", min_value=0, value=0, step=10)
+            H = c3.number_input("", key=f"prev_2t_ind_{axis}_{target}_H", min_value=0, value=0)
+            axis_target_inputs.append((axis, target, int(N), int(SUM), int(H)))
+
+        st.divider()
+
+        st.markdown("## 3連複 1-2-全 引継ぎ入力（累積）")
+        st.caption("対象N・払戻合計SUM・的中Hを入力。7車基準の5点買いとして、KSUMは対象N×5で自動計算します。")
+        hdr_3f_all = st.columns([1.6, 1, 1.4, 1])
+        hdr_3f_all[0].markdown("**型**")
+        hdr_3f_all[1].markdown("**対象N**")
+        hdr_3f_all[2].markdown("**払戻合計SUM**")
+        hdr_3f_all[3].markdown("**的中H**")
+
         sanrenpuku12_inputs = []
+        for label in agg_payout_sanrenpuku12_all_manual.keys():
+            c0, c1, c2, c3 = st.columns([1.6, 1, 1.4, 1])
+            c0.write(f"3連複 1-2-全｜{label}")
+            N = c1.number_input("", key=f"prev_3f12_all_{label}_N", min_value=0, value=0)
+            SUM = c2.number_input("", key=f"prev_3f12_all_{label}_SUM", min_value=0, value=0, step=10)
+            H = c3.number_input("", key=f"prev_3f12_all_{label}_H", min_value=0, value=0)
+            sanrenpuku12_inputs.append((label, int(N), int(SUM), int(H)))
+
+        st.markdown("## 3連複 個別 引継ぎ入力（累積）")
+        st.caption("対象N・払戻合計SUM・的中Hを入力。各買い目1点扱いなので、KSUMは対象Nと同じです。")
+        hdr_3f_ind = st.columns([1.6, 1, 1.4, 1])
+        hdr_3f_ind[0].markdown("**目**")
+        hdr_3f_ind[1].markdown("**対象N**")
+        hdr_3f_ind[2].markdown("**払戻合計SUM**")
+        hdr_3f_ind[3].markdown("**的中H**")
+
         sanrenpuku12_individual_inputs = []
+        for label, key_map in agg_payout_sanrenpuku12_individual_manual.items():
+            for key in key_map.keys():
+                safe_key = str(key).replace("-", "_")
+                c0, c1, c2, c3 = st.columns([1.6, 1, 1.4, 1])
+                c0.write(key)
+                N = c1.number_input("", key=f"prev_3f_ind_{label}_{safe_key}_N", min_value=0, value=0)
+                SUM = c2.number_input("", key=f"prev_3f_ind_{label}_{safe_key}_SUM", min_value=0, value=0, step=10)
+                H = c3.number_input("", key=f"prev_3f_ind_{label}_{safe_key}_H", min_value=0, value=0)
+                sanrenpuku12_individual_inputs.append((label, key, int(N), int(SUM), int(H)))
+
+        st.divider()
+
+        st.markdown("## 2車複セット 引継ぎ入力（累積）")
+        st.caption("標準 1-234 などのセット集計を直接引き継ぐ場合だけ入力。個別2車複とは別枠です。")
+        hdr_nf_set = st.columns([1.6, 1, 1, 1.4, 1])
+        hdr_nf_set[0].markdown("**型**")
+        hdr_nf_set[1].markdown("**対象N**")
+        hdr_nf_set[2].markdown("**総点数KSUM**")
+        hdr_nf_set[3].markdown("**払戻合計SUM**")
+        hdr_nf_set[4].markdown("**的中H**")
+
         nishafuku_set_inputs = []
+        for set_label, labels in NISHAFUKU_SET_DEFS.items():
+            c0, c1, c2, c3, c4 = st.columns([1.6, 1, 1, 1.4, 1])
+            c0.write(set_label)
+            N = c1.number_input("", key=f"prev_nf_set_{set_label}_N", min_value=0, value=0)
+            default_ksum = int(N) * len(labels) if int(N) > 0 else 0
+            KSUM = c2.number_input("", key=f"prev_nf_set_{set_label}_KSUM", min_value=0, value=default_ksum)
+            SUM = c3.number_input("", key=f"prev_nf_set_{set_label}_SUM", min_value=0, value=0, step=10)
+            H = c4.number_input("", key=f"prev_nf_set_{set_label}_H", min_value=0, value=0)
+            nishafuku_set_inputs.append((set_label, int(N), int(KSUM), int(SUM), int(H)))
 
         st.form_submit_button("前日までの集計を反映")
 
@@ -3131,9 +3226,19 @@ with tabs[1]:
 
     for axis, N, KSUM, SUM, H in payout_inputs:
         if any([N, KSUM, SUM, H]):
+            if int(KSUM) <= 0 and int(N) > 0:
+                KSUM = int(N) * len(targets_for_pattern(axis, FIELD_SIZE))
             rec = agg_payout_2t_pattern_manual[axis]
             rec["N"] += int(N)
             rec["KSUM"] += int(KSUM)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+
+    for axis, target, N, SUM, H in axis_target_inputs:
+        if any([N, SUM, H]) and (axis, target) in agg_payout_axis_target_manual:
+            rec = agg_payout_axis_target_manual[(axis, target)]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(N)
             rec["SUM"] += int(SUM)
             rec["H"] += int(H)
 
@@ -3179,6 +3284,8 @@ with tabs[1]:
 
     for set_label, N, KSUM, SUM, H in nishafuku_set_inputs:
         if any([N, KSUM, SUM, H]):
+            if int(KSUM) <= 0 and int(N) > 0:
+                KSUM = int(N) * len(NISHAFUKU_SET_DEFS.get(set_label, []))
             rec = agg_payout_nishafuku_set_manual[set_label]
             rec["N"] += int(N)
             rec["KSUM"] += int(KSUM)
