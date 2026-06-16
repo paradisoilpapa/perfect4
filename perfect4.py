@@ -1013,6 +1013,133 @@ WIDE12_TARGET_EV = 1.10
 WIDE12_SAFETY_FACTOR = 1.15
 
 
+def wide_pair_switch_stats(a: int, b: int, pair12_total: Dict[PairKey, int], pair13_total: Dict[PairKey, int], pair23_total: Dict[PairKey, int]) -> Dict:
+    """
+    推奨流れa-bワイドの的中数と切替オッズを、既存3集計から自動計算する。
+
+    対象：
+      ・1着-2着がa-b
+      ・1着-3着がa-b
+      ・2着-3着がa-b
+    上記3つを合算し、a番手・b番手が3着以内に同時に入った回数として扱う。
+    """
+    a = int(a)
+    b = int(b)
+    one_two_ab = int(pair12_total.get((a, b), 0))
+    one_two_ba = int(pair12_total.get((b, a), 0))
+    one_two = one_two_ab + one_two_ba
+    one_three = int(_pair13_combo_count(pair13_total, a, b))
+    two_three = int(_pair23_combo_count(pair23_total, a, b))
+    hit = one_two + one_three + two_three
+
+    total_races = int(sum(int(v) for v in pair12_total.values()))
+    rate_value = (hit / total_races) if total_races > 0 else 0.0
+
+    if rate_value > 0:
+        break_even_odds = 1.00 / rate_value
+        ev_required_odds = WIDE12_TARGET_EV / rate_value
+        recommended_min_odds = ev_required_odds * WIDE12_SAFETY_FACTOR
+    else:
+        break_even_odds = None
+        ev_required_odds = None
+        recommended_min_odds = None
+
+    return {
+        "a": a,
+        "b": b,
+        "label": f"{a}-{b}",
+        "one_two_ab": one_two_ab,
+        "one_two_ba": one_two_ba,
+        "one_two": one_two,
+        "one_three": one_three,
+        "two_three": two_three,
+        "hit": hit,
+        "total_races": total_races,
+        "rate": rate_value,
+        "break_even_odds": break_even_odds,
+        "ev_required_odds": ev_required_odds,
+        "recommended_min_odds": recommended_min_odds,
+    }
+
+
+def render_wide_pair_switch_section(a: int, b: int, pair12_total: Dict[PairKey, int], pair13_total: Dict[PairKey, int], pair23_total: Dict[PairKey, int]) -> Dict:
+    """推奨流れa-bワイド集計と、切替用の必要合成オッズを表示する。"""
+    stats = wide_pair_switch_stats(a, b, pair12_total, pair13_total, pair23_total)
+    label = stats["label"]
+
+    st.markdown(f"### 推奨流れ{label}ワイド集計｜切替オッズ判定")
+    st.caption(
+        f"既存の3集計表から、推奨流れ{a}番手・{b}番手が3着以内に一緒に入った回数を自動集計します。"
+        "手入力欄やサイドバー入力は使いません。"
+    )
+
+    df_summary = pd.DataFrame([
+        {
+            "項目": f"1着-2着 {label}",
+            "回数": stats["one_two"],
+            "内訳": f"{a}→{b}={stats['one_two_ab']} / {b}→{a}={stats['one_two_ba']}",
+        },
+        {
+            "項目": f"1着-3着 {label}",
+            "回数": stats["one_three"],
+            "内訳": f"1着と3着 評価組み合わせ表の{label}",
+        },
+        {
+            "項目": f"2着-3着 {label}",
+            "回数": stats["two_three"],
+            "内訳": f"2着と3着 評価組み合わせ表の{label}",
+        },
+        {
+            "項目": f"推奨流れ{label}ワイド的中数",
+            "回数": stats["hit"],
+            "内訳": f"{stats['one_two']} + {stats['one_three']} + {stats['two_three']}",
+        },
+    ])
+    st.dataframe(df_summary, use_container_width=True, hide_index=True)
+
+    df_odds = pd.DataFrame([
+        {
+            "項目": "総レース数",
+            "値": f"{stats['total_races']}R",
+        },
+        {
+            "項目": f"推奨流れ{label}ワイド的中率",
+            "値": f"{round(stats['rate'] * 100.0, 1)}%" if stats["total_races"] > 0 else "—",
+        },
+        {
+            "項目": "目標EV",
+            "値": f"{WIDE12_TARGET_EV:.2f}",
+        },
+        {
+            "項目": "安全係数",
+            "値": f"{WIDE12_SAFETY_FACTOR:.2f}",
+        },
+        {
+            "項目": "損益分岐合成オッズ",
+            "値": f"約{stats['break_even_odds']:.2f}倍" if stats["break_even_odds"] is not None else "—",
+        },
+        {
+            "項目": f"EV{WIDE12_TARGET_EV:.2f}必要合成オッズ",
+            "値": f"約{stats['ev_required_odds']:.2f}倍" if stats["ev_required_odds"] is not None else "—",
+        },
+        {
+            "項目": "安全係数込み 推奨下限合成オッズ",
+            "値": f"約{stats['recommended_min_odds']:.2f}倍" if stats["recommended_min_odds"] is not None else "—",
+        },
+    ])
+    st.dataframe(df_odds, use_container_width=True, hide_index=True)
+
+    if stats["recommended_min_odds"] is not None:
+        st.info(
+            f"推奨流れ{label}-全 三連複は、合成実効オッズが約{stats['recommended_min_odds']:.2f}倍以上なら優先候補。"
+            "これ未満なら、別フォメ・2車複フォメへの切替を検討。"
+        )
+    else:
+        st.warning(f"推奨流れ{label}ワイド的中率が0%のため、必要合成オッズを計算できません。")
+
+    return stats
+
+
 def ksum_nishafuku_3412(field_n: int) -> int:
     """34-12 2車複フォメの点数。推奨流れの1～4番手が存在する時だけ4点。"""
     try:
@@ -3809,91 +3936,22 @@ with tabs[2]:
 
     st.divider()
 
-    st.markdown("### 推奨流れ1-2ワイド集計｜切替オッズ判定")
-    st.caption(
-        "既存の3集計表から、推奨流れ1番手・2番手が3着以内に一緒に入った回数を自動集計します。"
-        "手入力欄やサイドバー入力は使いません。"
-    )
+    wide_switch_stats_rows = []
+    for _wide_a, _wide_b in [(1, 2), (1, 3), (2, 3)]:
+        if wide_switch_stats_rows:
+            st.divider()
+        _stats = render_wide_pair_switch_section(_wide_a, _wide_b, pair12_total, pair13_total, pair23_total)
+        wide_switch_stats_rows.append({
+            "ワイド": _stats["label"],
+            "対象N": _stats["total_races"],
+            "的中H": _stats["hit"],
+            "的中率%": round(_stats["rate"] * 100.0, 1) if _stats["total_races"] > 0 else None,
+            "損益分岐合成オッズ": round(_stats["break_even_odds"], 2) if _stats["break_even_odds"] is not None else None,
+            f"EV{WIDE12_TARGET_EV:.2f}必要合成オッズ": round(_stats["ev_required_odds"], 2) if _stats["ev_required_odds"] is not None else None,
+            "安全係数込み推奨下限": round(_stats["recommended_min_odds"], 2) if _stats["recommended_min_odds"] is not None else None,
+        })
 
-    wide12_1st_2nd_12 = int(pair12_total.get((1, 2), 0))
-    wide12_1st_2nd_21 = int(pair12_total.get((2, 1), 0))
-    wide12_1st_2nd = wide12_1st_2nd_12 + wide12_1st_2nd_21
-    wide12_1st_3rd = int(_pair13_combo_count(pair13_total, 1, 2))
-    wide12_2nd_3rd = int(_pair23_combo_count(pair23_total, 1, 2))
-    wide12_hit = wide12_1st_2nd + wide12_1st_3rd + wide12_2nd_3rd
-
-    wide12_total_races = int(sum(int(v) for v in pair12_total.values()))
-    wide12_rate = (wide12_hit / wide12_total_races) if wide12_total_races > 0 else 0.0
-
-    if wide12_rate > 0:
-        wide12_break_even_odds = 1.00 / wide12_rate
-        wide12_ev_required_odds = WIDE12_TARGET_EV / wide12_rate
-        wide12_recommended_min_odds = wide12_ev_required_odds * WIDE12_SAFETY_FACTOR
-    else:
-        wide12_break_even_odds = None
-        wide12_ev_required_odds = None
-        wide12_recommended_min_odds = None
-
-    df_wide12_summary = pd.DataFrame([
-        {
-            "項目": "1着-2着 1-2",
-            "回数": wide12_1st_2nd,
-            "内訳": f"1→2={wide12_1st_2nd_12} / 2→1={wide12_1st_2nd_21}",
-        },
-        {
-            "項目": "1着-3着 1-2",
-            "回数": wide12_1st_3rd,
-            "内訳": "1着と3着 評価組み合わせ表の1-2",
-        },
-        {
-            "項目": "2着-3着 1-2",
-            "回数": wide12_2nd_3rd,
-            "内訳": "2着と3着 評価組み合わせ表の1-2",
-        },
-        {
-            "項目": "推奨流れ1-2ワイド的中数",
-            "回数": wide12_hit,
-            "内訳": f"{wide12_1st_2nd} + {wide12_1st_3rd} + {wide12_2nd_3rd}",
-        },
-    ])
-    st.dataframe(df_wide12_summary, use_container_width=True, hide_index=True)
-
-    df_wide12_odds = pd.DataFrame([
-        {
-            "項目": "総レース数",
-            "値": f"{wide12_total_races}R",
-        },
-        {
-            "項目": "推奨流れ1-2ワイド的中率",
-            "値": f"{round(wide12_rate * 100.0, 1)}%" if wide12_total_races > 0 else "—",
-        },
-        {
-            "項目": "目標EV",
-            "値": f"{WIDE12_TARGET_EV:.2f}",
-        },
-        {
-            "項目": "安全係数",
-            "値": f"{WIDE12_SAFETY_FACTOR:.2f}",
-        },
-        {
-            "項目": "損益分岐合成オッズ",
-            "値": f"約{wide12_break_even_odds:.2f}倍" if wide12_break_even_odds is not None else "—",
-        },
-        {
-            "項目": f"EV{WIDE12_TARGET_EV:.2f}必要合成オッズ",
-            "値": f"約{wide12_ev_required_odds:.2f}倍" if wide12_ev_required_odds is not None else "—",
-        },
-        {
-            "項目": "安全係数込み 推奨下限合成オッズ",
-            "値": f"約{wide12_recommended_min_odds:.2f}倍" if wide12_recommended_min_odds is not None else "—",
-        },
-    ])
-    st.dataframe(df_wide12_odds, use_container_width=True, hide_index=True)
-
-    if wide12_recommended_min_odds is not None:
-        st.info(
-            f"推奨流れ1-2-全 三連複は、合成実効オッズが約{wide12_recommended_min_odds:.2f}倍以上なら優先候補。"
-            "これ未満なら、推奨流れ34-12 2車複フォメへの切替を検討。"
-        )
-    else:
-        st.warning("推奨流れ1-2ワイド的中率が0%のため、必要合成オッズを計算できません。")
+    st.divider()
+    st.markdown("### 推奨流れワイド切替オッズ比較")
+    st.caption("1-2・1-3・2-3の必要合成オッズを同じ表で比較します。")
+    st.dataframe(pd.DataFrame(wide_switch_stats_rows), use_container_width=True, hide_index=True)
