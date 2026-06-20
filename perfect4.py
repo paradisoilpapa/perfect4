@@ -348,6 +348,22 @@ def rate(x: int, n: int):
     return round(100.0 * x / n, 1) if n > 0 else None
 
 
+def fmt_1decimal_safe(x):
+    """Streamlit/Pandas Styler用。None/NaN/文字列混在でも小数1桁表示で落とさない。"""
+    try:
+        if x is None or pd.isna(x):
+            return ""
+    except Exception:
+        if x is None:
+            return ""
+    try:
+        return f"{float(x):.1f}"
+    except Exception:
+        if str(x).strip() in ("None", "nan", "NaN"):
+            return ""
+        return str(x)
+
+
 def payout_zone_key(pay: int) -> str | None:
     """2車複払戻（100円あたり）を的中ゾーンへ分類する。"""
     try:
@@ -739,7 +755,7 @@ def render_virtual_zone_roi_table(df: pd.DataFrame, height: int | None = None) -
     h = height if height is not None else table_auto_height(df)
     styled = (
         df.style
-        .format({"仮想合計回収率%": "{:.1f}"})
+        .format({"仮想合計回収率%": fmt_1decimal_safe})
         .apply(highlight_virtual_zone_roi, axis=1)
     )
     st.dataframe(
@@ -1991,7 +2007,7 @@ def render_actual_roi_table(df: pd.DataFrame, height: int | None = None) -> None
         "ペア基準配当",
     ]:
         if col in out.columns:
-            fmt[col] = "{:.1f}"
+            fmt[col] = fmt_1decimal_safe
     styled = out.style.apply(highlight_actual_roi_row, axis=1).format(fmt, na_rep="")
     st.dataframe(
         styled,
