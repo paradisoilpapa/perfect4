@@ -468,8 +468,8 @@ def render_zone_table(df: pd.DataFrame, height: int | None = None) -> None:
 # =========================
 # 個別2車複：ゾーン別 仮想回収寄与率
 # =========================
-# 実払戻を細かく持っていないため、各ゾーンは中央値で仮想払戻を計算する。
-# 20.1倍以上は万車券・超高配当1本で表が壊れないよう、保守的に25倍で固定する。
+# 旧累積は実払戻明細を持たないため、各ゾーンは中央値で仮想払戻を計算する。
+# 中央値は今日入力分の実払戻から作り、サンプルがないゾーンだけ固定中央値へ戻す。
 #
 # 重要：現状の入力データには「外れた時に、そのペアがどのオッズ帯だったか」が存在しない。
 # そのため、ここで出せるのは厳密な「ゾーン別回収率」ではなく、
@@ -477,7 +477,7 @@ def render_zone_table(df: pd.DataFrame, height: int | None = None) -> None:
 #   ・各的中ゾーンが回収率に何％分貢献したか
 # を示す「仮想回収寄与率」。
 # 厳密なゾーン別回収率を出すには、非的中分も含めたゾーン対象Nが必要。
-ZONE_VIRTUAL_ODDS = {
+ZONE_DEFAULT_ODDS = {
     "Z3": 2.5,
     "Z6": 4.5,
     "Z10": 8.0,
@@ -494,7 +494,67 @@ ZONE_LABELS = {
 ZONE_KEYS_ORDER = ("Z3", "Z6", "Z10", "Z20", "Z20P")
 
 
-def _virtual_zone_contrib_values(rec: Dict[str, int], zone_key: str) -> tuple[int, float | None]:
+def build_daily_zone_median_odds(byrace_rows: List[Dict], pairs: List[Tuple[int, int]]) -> tuple[Dict[str, float], Dict[str, int], pd.DataFrame]:
+    """
+    今日入力分の実払戻から、ゾーン別の実中央値オッズを作る。
+
+    旧累積の引継ぎデータはゾーン本数だけで実払戻の明細を持たないため、
+    現在の新規入力分だけを中央値作成に使う。
+    サンプルがないゾーンは固定中央値へフォールバックする。
+    """
+    pair_set = {tuple(sorted((int(a), int(b)))) for a, b in pairs}
+    values = {k: [] for k in ZONE_KEYS_ORDER}
+
+    for row in byrace_rows or []:
+        vorder = row.get("vorder", [])
+        finish = row.get("finish", [])
+        try:
+            field_n = int(row.get("field_n", len(vorder) or 0))
+            pay_2f = int(row.get("pay_2f", 0) or 0)
+        except Exception:
+            continue
+
+        if not vorder or field_n <= 0 or len(finish) < 2 or pay_2f <= 0:
+            continue
+
+        car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+        win_rank = car_to_rank.get(finish[0])
+        sec_rank = car_to_rank.get(finish[1])
+        if win_rank is None or sec_rank is None:
+            continue
+
+        pkey = tuple(sorted((int(win_rank), int(sec_rank))))
+        if pkey not in pair_set:
+            continue
+
+        zkey = payout_zone_key(pay_2f)
+        if zkey in values:
+            values[zkey].append(pay_2f / 100.0)
+
+    zone_odds: Dict[str, float] = {}
+    zone_counts: Dict[str, int] = {}
+    rows = []
+    for zkey in ZONE_KEYS_ORDER:
+        vals = values.get(zkey, [])
+        zone_counts[zkey] = len(vals)
+        if vals:
+            med = float(pd.Series(vals).median())
+            source = "今日入力中央値"
+        else:
+            med = float(ZONE_DEFAULT_ODDS[zkey])
+            source = "固定中央値"
+        zone_odds[zkey] = round(med, 2)
+        rows.append({
+            "オッズ帯": ZONE_LABELS[zkey],
+            "今日入力サンプルN": len(vals),
+            "使用中央値": round(med, 2),
+            "採用": source,
+        })
+
+    return zone_odds, zone_counts, pd.DataFrame(rows)
+
+
+def _virtual_zone_contrib_values(rec: Dict[str, int], zone_key: str, zone_odds: Dict[str, float] | None = None) -> tuple[int, float | None]:
     """
     ゾーン別の仮想回収寄与率を計算する。
 
@@ -502,22 +562,23 @@ def _virtual_zone_contrib_values(rec: Dict[str, int], zone_key: str) -> tuple[in
     """
     N = int(rec.get("N", 0) or 0)
     H = int(rec.get(zone_key, 0) or 0)
-    odds = float(ZONE_VIRTUAL_ODDS.get(zone_key, 0.0))
+    odds_map = zone_odds or ZONE_DEFAULT_ODDS
+    odds = float(odds_map.get(zone_key, ZONE_DEFAULT_ODDS.get(zone_key, 0.0)))
     virtual_sum = H * odds * 100.0
     invest = N * 100.0
     contrib = round(100.0 * virtual_sum / invest, 1) if invest > 0 else None
     return H, contrib
 
 
-def _virtual_zone_contrib_cell(rec: Dict[str, int], zone_key: str) -> str:
+def _virtual_zone_contrib_cell(rec: Dict[str, int], zone_key: str, zone_odds: Dict[str, float] | None = None) -> str:
     """元の的中ゾーン分布と対応するセル表示。例：4本 / +40.0%"""
-    H, contrib = _virtual_zone_contrib_values(rec, zone_key)
+    H, contrib = _virtual_zone_contrib_values(rec, zone_key, zone_odds)
     if contrib is None:
         return "0本 / —"
     return f"{H}本 / +{contrib:.1f}%"
 
 
-def _virtual_total_roi(rec: Dict[str, int]) -> float | None:
+def _virtual_total_roi(rec: Dict[str, int], zone_odds: Dict[str, float] | None = None) -> float | None:
     """中央値置換で、そのペアを全対象Rで1点買いした場合の仮想合計回収率。"""
     N = int(rec.get("N", 0) or 0)
     if N <= 0:
@@ -525,7 +586,8 @@ def _virtual_total_roi(rec: Dict[str, int]) -> float | None:
     virtual_sum = 0.0
     for zone_key in ZONE_KEYS_ORDER:
         H = int(rec.get(zone_key, 0) or 0)
-        odds = float(ZONE_VIRTUAL_ODDS.get(zone_key, 0.0))
+        odds_map = zone_odds or ZONE_DEFAULT_ODDS
+        odds = float(odds_map.get(zone_key, ZONE_DEFAULT_ODDS.get(zone_key, 0.0)))
         virtual_sum += H * odds * 100.0
     return round(100.0 * virtual_sum / (N * 100.0), 1)
 
@@ -540,7 +602,7 @@ def _virtual_roi_judgement(roi: float | None) -> str:
     return ""
 
 
-def build_virtual_zone_roi_table(payout_total: Dict[str, Dict[str, int]], pairs: List[Tuple[int, int]]) -> pd.DataFrame:
+def build_virtual_zone_roi_table(payout_total: Dict[str, Dict[str, int]], pairs: List[Tuple[int, int]], zone_odds: Dict[str, float] | None = None) -> pd.DataFrame:
     """
     個別2車複ゾーン別 仮想回収寄与率表。
 
@@ -556,7 +618,7 @@ def build_virtual_zone_roi_table(payout_total: Dict[str, Dict[str, int]], pairs:
             continue
         pair_key = f"{a}-{b}"
         rec = payout_total[label]
-        total_roi = _virtual_total_roi(rec)
+        total_roi = _virtual_total_roi(rec, zone_odds)
 
         row = {
             "ペア": pair_key,
@@ -565,7 +627,7 @@ def build_virtual_zone_roi_table(payout_total: Dict[str, Dict[str, int]], pairs:
             "判定": _virtual_roi_judgement(total_roi),
         }
         for zone_key in ZONE_KEYS_ORDER:
-            row[ZONE_LABELS[zone_key]] = _virtual_zone_contrib_cell(rec, zone_key)
+            row[ZONE_LABELS[zone_key]] = _virtual_zone_contrib_cell(rec, zone_key, zone_odds)
         rows.append(row)
 
     # 総合行は入れない。
@@ -3978,9 +4040,13 @@ with tabs[2]:
         "ただし現状は非的中時のオッズ帯を持っていないため、厳密なゾーン別回収率ではありません。"
         "各セルは『的中本数 / そのゾーンの仮想回収寄与率』です。"
         "右側の仮想合計回収率は、そのペアを全対象レースで1点買いした場合に、各ゾーン中央値で払戻を置き換えた概算です。"
-        "中央値は、〜3倍=2.5倍、3.1〜6倍=4.5倍、6.1〜10倍=8倍、10.1〜20倍=15倍、20.1倍〜=25倍で計算します。"
+        "中央値は今日入力分の実払戻から算出し、サンプルがないゾーンのみ固定中央値で補完します。"
     )
-    df_zone_roi = build_virtual_zone_roi_table(payout_nishafuku_total, NISHAFUKU_PAIRS)
+    zone_median_odds, zone_median_counts, df_zone_medians = build_daily_zone_median_odds(byrace_rows, NISHAFUKU_PAIRS)
+    st.markdown("#### ゾーン別 使用中央値")
+    st.caption("今日入力分の2車複実払戻から作ったゾーン別中央値です。N=0のゾーンは固定中央値を使います。")
+    st.dataframe(df_zone_medians, use_container_width=True, hide_index=True)
+    df_zone_roi = build_virtual_zone_roi_table(payout_nishafuku_total, NISHAFUKU_PAIRS, zone_median_odds)
     zone_roi_cols = ["ペア", "対象N", "仮想合計回収率%", "判定", "〜3倍", "3.1〜6倍", "6.1〜10倍", "10.1〜20倍", "20.1倍〜"]
     render_virtual_zone_roi_table(df_zone_roi[[c for c in zone_roi_cols if c in df_zone_roi.columns]])
 
