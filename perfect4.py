@@ -494,14 +494,24 @@ ZONE_LABELS = {
 ZONE_KEYS_ORDER = ("Z3", "Z6", "Z10", "Z20", "Z20P")
 
 
-def build_daily_zone_median_odds(byrace_rows: List[Dict], pairs: List[Tuple[int, int]]) -> tuple[Dict[str, float], Dict[str, int], pd.DataFrame]:
+def build_zone_median_odds(
+    byrace_rows: List[Dict],
+    pairs: List[Tuple[int, int]],
+    carryover: Dict[str, Dict[str, float]] | None = None,
+) -> tuple[Dict[str, float], Dict[str, int], pd.DataFrame]:
     """
-    今日入力分の実払戻から、ゾーン別の実中央値オッズを作る。
+    ゾーン別の使用中央値オッズを作る。
 
-    旧累積の引継ぎデータはゾーン本数だけで実払戻の明細を持たないため、
-    現在の新規入力分だけを中央値作成に使う。
-    サンプルがないゾーンは固定中央値へフォールバックする。
+    優先順位：
+      1) 引継ぎ中央値 + 今日入力中央値を、サンプルNで加重平均した代表中央値
+      2) 引継ぎ中央値のみ
+      3) 今日入力中央値のみ
+      4) 固定中央値
+
+    注意：中央値そのものは本来、過去の全払戻明細がないと正確に累積できない。
+    この引継ぎは「前日までの代表中央値」と「今日の中央値」をN加重平均する近似。
     """
+    carryover = carryover or {}
     pair_set = {tuple(sorted((int(a), int(b)))) for a, b in pairs}
     values = {k: [] for k in ZONE_KEYS_ORDER}
 
@@ -536,23 +546,58 @@ def build_daily_zone_median_odds(byrace_rows: List[Dict], pairs: List[Tuple[int,
     rows = []
     for zkey in ZONE_KEYS_ORDER:
         vals = values.get(zkey, [])
-        zone_counts[zkey] = len(vals)
-        if vals:
-            med = float(pd.Series(vals).median())
+        today_n = len(vals)
+        today_med = float(pd.Series(vals).median()) if vals else None
+
+        carry = carryover.get(zkey, {}) or {}
+        try:
+            carry_n = int(carry.get("N", 0) or 0)
+        except Exception:
+            carry_n = 0
+        try:
+            carry_med = float(carry.get("median", 0.0) or 0.0)
+        except Exception:
+            carry_med = 0.0
+        if carry_med <= 0:
+            carry_n = 0
+            carry_med = 0.0
+
+        if carry_n > 0 and today_n > 0 and today_med is not None:
+            med = (carry_n * carry_med + today_n * today_med) / (carry_n + today_n)
+            use_n = carry_n + today_n
+            source = "引継ぎ+今日（N加重）"
+        elif carry_n > 0:
+            med = carry_med
+            use_n = carry_n
+            source = "引継ぎ中央値"
+        elif today_n > 0 and today_med is not None:
+            med = today_med
+            use_n = today_n
             source = "今日入力中央値"
         else:
             med = float(ZONE_DEFAULT_ODDS[zkey])
+            use_n = 0
             source = "固定中央値"
-        zone_odds[zkey] = round(med, 2)
+
+        zone_counts[zkey] = int(use_n)
+        zone_odds[zkey] = round(float(med), 2)
         rows.append({
             "オッズ帯": ZONE_LABELS[zkey],
-            "今日入力サンプルN": len(vals),
-            "使用中央値": round(med, 2),
+            "引継ぎN": carry_n,
+            "引継ぎ中央値": round(carry_med, 2) if carry_n > 0 else None,
+            "今日入力N": today_n,
+            "今日中央値": round(today_med, 2) if today_med is not None else None,
+            "使用N": int(use_n),
+            "使用中央値": round(float(med), 2),
             "採用": source,
         })
 
     return zone_odds, zone_counts, pd.DataFrame(rows)
 
+
+# 旧名互換：内部呼び出しが残っても動くようにする。
+def build_daily_zone_median_odds(byrace_rows: List[Dict], pairs: List[Tuple[int, int]]) -> tuple[Dict[str, float], Dict[str, int], pd.DataFrame]:
+    return build_zone_median_odds(byrace_rows, pairs, None)
 
 def _virtual_zone_contrib_values(rec: Dict[str, int], zone_key: str, zone_odds: Dict[str, float] | None = None) -> tuple[int, float | None]:
     """
@@ -3217,6 +3262,12 @@ agg_payout_sanrenpuku12_individual_manual: Dict[str, Dict[str, Dict[str, int]]] 
     "仮想全体": {k: new_payout_rec() for k in TRIO_USED_KEYS},
 }
 
+# 前日まで：2車複ゾーン中央値 引継ぎ用。
+# 正確な累積中央値ではなく、前日までの代表中央値と本日中央値をN加重でつなぐための入力。
+zone_median_carryover_manual: Dict[str, Dict[str, float]] = {
+    zkey: {"N": 0, "median": 0.0} for zkey in ZONE_KEYS_ORDER
+}
+
 
 
 # =========================
@@ -3464,6 +3515,24 @@ with tabs[1]:
             Z20P = c5.number_input("", key=f"{key_base}_Z20P", min_value=0, value=0)
             nishafuku_zone_inputs.append((label, int(Z3), int(Z6), int(Z10), int(Z20), int(Z20P)))
 
+        st.markdown("## 2車複ゾーン中央値 引継ぎ入力")
+        st.caption(
+            "前回表示された『ゾーン別 使用中央値』の使用N・使用中央値を入力してください。"
+            "正確な累積中央値には全払戻明細が必要なため、ここでは前日までの代表中央値と今日入力中央値をN加重でつなぎます。"
+        )
+        hdr_med = st.columns([1.6, 1.0, 1.2])
+        hdr_med[0].markdown("**オッズ帯**")
+        hdr_med[1].markdown("**引継ぎN**")
+        hdr_med[2].markdown("**引継ぎ中央値**")
+
+        zone_median_carry_inputs = []
+        for zkey in ZONE_KEYS_ORDER:
+            c0, c1, c2 = st.columns([1.6, 1.0, 1.2])
+            c0.write(ZONE_LABELS[zkey])
+            med_n = c1.number_input("", key=f"zone_median_carry_{zkey}_N", min_value=0, value=0)
+            med_val = c2.number_input("", key=f"zone_median_carry_{zkey}_median", min_value=0.0, value=0.0, step=0.1, format="%.2f")
+            zone_median_carry_inputs.append((zkey, int(med_n), float(med_val)))
+
         st.divider()
 
         # 集計結果に出さない旧検証用の引継ぎ入力欄は削除。
@@ -3509,6 +3578,11 @@ with tabs[1]:
             rec["Z10"] += int(Z10)
             rec["Z20"] += int(Z20)
             rec["Z20P"] += int(Z20P)
+
+    for zkey, med_n, med_val in zone_median_carry_inputs:
+        if zkey in zone_median_carryover_manual and med_n > 0 and med_val > 0:
+            zone_median_carryover_manual[zkey]["N"] = int(med_n)
+            zone_median_carryover_manual[zkey]["median"] = float(med_val)
 
     # 34-12前日まで分は専用入力を持たせず、既存の個別2車複引継ぎから自動合算する。
     # Nは4点の最大N、KSUM/SUM/Hは4点合計。
@@ -4040,11 +4114,18 @@ with tabs[2]:
         "ただし現状は非的中時のオッズ帯を持っていないため、厳密なゾーン別回収率ではありません。"
         "各セルは『的中本数 / そのゾーンの仮想回収寄与率』です。"
         "右側の仮想合計回収率は、そのペアを全対象レースで1点買いした場合に、各ゾーン中央値で払戻を置き換えた概算です。"
-        "中央値は今日入力分の実払戻から算出し、サンプルがないゾーンのみ固定中央値で補完します。"
+        "中央値は引継ぎ入力と今日入力分の実払戻から作ります。サンプルがないゾーンのみ固定中央値で補完します。"
     )
-    zone_median_odds, zone_median_counts, df_zone_medians = build_daily_zone_median_odds(byrace_rows, NISHAFUKU_PAIRS)
-    st.markdown("#### ゾーン別 使用中央値")
-    st.caption("今日入力分の2車複実払戻から作ったゾーン別中央値です。N=0のゾーンは固定中央値を使います。")
+    zone_median_odds, zone_median_counts, df_zone_medians = build_zone_median_odds(
+        byrace_rows,
+        NISHAFUKU_PAIRS,
+        zone_median_carryover_manual,
+    )
+    st.markdown("#### ゾーン別 使用中央値・引継ぎ用")
+    st.caption(
+        "前日までの引継ぎ中央値と今日入力分の2車複実払戻中央値を使って作った代表中央値です。"
+        "次回はこの表の『使用N』と『使用中央値』を、前日までタブの『2車複ゾーン中央値 引継ぎ入力』へ転記してください。"
+    )
     st.dataframe(df_zone_medians, use_container_width=True, hide_index=True)
     df_zone_roi = build_virtual_zone_roi_table(payout_nishafuku_total, NISHAFUKU_PAIRS, zone_median_odds)
     zone_roi_cols = ["ペア", "対象N", "仮想合計回収率%", "判定", "〜3倍", "3.1〜6倍", "6.1〜10倍", "10.1〜20倍", "20.1倍〜"]
