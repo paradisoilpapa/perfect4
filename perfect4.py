@@ -1938,6 +1938,60 @@ def render_sortable_table(df: pd.DataFrame, height: int | None = None):
     )
 
 
+def roi判定_label(value) -> str:
+    """回収率%から表示用の判定ラベルを返す。"""
+    try:
+        x = float(value)
+    except Exception:
+        return ""
+    if x >= 100.0:
+        return "100%超"
+    if x >= 90.0:
+        return "90%超"
+    return ""
+
+
+def highlight_actual_roi_row(row: pd.Series) -> pd.Series:
+    """実回収率100%以上・90%以上を色付けする。ゾーン別仮想表とは別に、実回収率用。"""
+    styles = pd.Series("", index=row.index)
+    if "回収率%" not in row.index or pd.isna(row.get("回収率%")):
+        return styles
+    try:
+        roi = float(row.get("回収率%"))
+    except Exception:
+        return styles
+    if roi >= 100.0:
+        for col in ["回収率%", "判定"]:
+            if col in styles.index:
+                styles[col] = "background-color: #d9ead3; font-weight: 700;"
+    elif roi >= 90.0:
+        for col in ["回収率%", "判定"]:
+            if col in styles.index:
+                styles[col] = "background-color: #e3f2fd; font-weight: 700;"
+    return styles
+
+
+def render_actual_roi_table(df: pd.DataFrame, height: int | None = None) -> None:
+    """実回収率表専用。回収率%を小数1桁で表示し、100%以上・90%以上を色付けする。"""
+    if df is None or df.empty:
+        st.info("表示するデータがありません。")
+        return
+    out = df.copy()
+    if "判定" in out.columns and "回収率%" in out.columns:
+        out["判定"] = out["回収率%"].apply(roi判定_label)
+    fmt = {}
+    for col in ["的中率%", "想定ペア的%", "想定回収率%", "回収率%", "想定差", "回収差"]:
+        if col in out.columns:
+            fmt[col] = "{:.1f}"
+    styled = out.style.apply(highlight_actual_roi_row, axis=1).format(fmt, na_rep="")
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+        height=height if height is not None else table_auto_height(out),
+    )
+
+
 
 # =========================
 # 投資EV診断（既存推奨買い目を変えずに診断だけ行う）
@@ -4089,7 +4143,7 @@ with tabs[2]:
         "想定差",
         "回収差",
     ]
-    render_sortable_table(
+    render_actual_roi_table(
         df_nishafuku_individual[[c for c in cols_nishafuku_individual if c in df_nishafuku_individual.columns]]
     )
 
