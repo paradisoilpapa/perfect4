@@ -484,113 +484,114 @@ ZONE_LABELS = {
     "Z20": "10.1〜20倍",
     "Z20P": "20.1倍〜",
 }
+ZONE_KEYS_ORDER = ("Z3", "Z6", "Z10", "Z20", "Z20P")
 
 
-def virtual_zone_roi_row(pair: str, rec: Dict[str, int], zone_key: str) -> Dict:
+def _virtual_zone_roi_values(rec: Dict[str, int], zone_key: str) -> tuple[int, float | None]:
     """
-    個別2車複のゾーン別仮想回収率行。
+    ゾーン別仮想回収率の内部計算。
 
-    注意：現状は「そのオッズ帯だった非的中レース数」を持っていない。
-    そのため対象Nは、該当ペアを全対象レースで1点買いした場合の母数として扱う。
-    これは「そのゾーンだけを事前に買った回収率」ではなく、
-    「そのゾーンの的中が全体投資に対してどれだけ回収貢献したか」を見る表。
+    現状は「そのオッズ帯だった非的中レース数」を持っていないため、
+    投資母数はそのペアを全対象レースで1点買いした場合のNとする。
     """
     N = int(rec.get("N", 0) or 0)
     H = int(rec.get(zone_key, 0) or 0)
     odds = float(ZONE_VIRTUAL_ODDS.get(zone_key, 0.0))
-    virtual_sum = int(round(H * odds * 100))
-    invest = int(N * 100)
-    hit_rate = round(100.0 * H / N, 1) if N > 0 else None
+    virtual_sum = H * odds * 100.0
+    invest = N * 100.0
     roi = round(100.0 * virtual_sum / invest, 1) if invest > 0 else None
+    return H, roi
 
+
+def _virtual_zone_cell(rec: Dict[str, int], zone_key: str) -> str:
+    """元の的中ゾーン分布と対応するセル表示。例：4本 / 40.0%"""
+    H, roi = _virtual_zone_roi_values(rec, zone_key)
     if roi is None:
-        mark = ""
-    elif roi >= 100.0:
-        mark = "買い候補"
-    elif roi >= 90.0:
-        mark = "監視"
-    else:
-        mark = ""
-
-    return {
-        "ペア": pair,
-        "オッズ帯": ZONE_LABELS.get(zone_key, zone_key),
-        "対象N": N,
-        "的中H": H,
-        "的中率%": hit_rate,
-        "仮想倍率": odds,
-        "仮想払戻": virtual_sum,
-        "投資額換算": invest,
-        "仮想回収率%": roi,
-        "判定": mark,
-    }
+        return "0本 / —"
+    return f"{H}本 / {roi:.1f}%"
 
 
 def build_virtual_zone_roi_table(payout_total: Dict[str, Dict[str, int]], pairs: List[Tuple[int, int]]) -> pd.DataFrame:
-    rows = []
+    """
+    個別2車複ゾーン別 仮想回収率表。
 
-    # ペア別×ゾーン
+    v122では「ペア×ゾーン」を縦に並べてROI順ソートしていたため、
+    元の的中ゾーン分布と対応しづらかった。
+    v123では、元表と同じく「ペアを行、ゾーンを列」にして、
+    各セルに「的中本数 / 仮想回収率」を表示する。
+    """
+    rows = []
+    total_rec = new_payout_rec()
+    total_rec["N"] = 0
+
     for a, b in pairs:
         label = nishafuku_label(a, b)
         if label not in payout_total:
             continue
         pair_key = f"{a}-{b}"
         rec = payout_total[label]
-        for zone_key in ("Z3", "Z6", "Z10", "Z20", "Z20P"):
-            rows.append(virtual_zone_roi_row(pair_key, rec, zone_key))
 
-    # 総合×ゾーン（全ペアを1点ずつ買った場合の投資母数）
-    total_by_zone = new_payout_rec()
-    total_by_zone["N"] = 0
-    for a, b in pairs:
-        label = nishafuku_label(a, b)
-        if label not in payout_total:
-            continue
-        rec = payout_total[label]
-        total_by_zone["N"] += int(rec.get("N", 0) or 0)
-        for k in ("Z3", "Z6", "Z10", "Z20", "Z20P"):
-            total_by_zone[k] += int(rec.get(k, 0) or 0)
+        row = {
+            "ペア": pair_key,
+            "対象N": int(rec.get("N", 0) or 0),
+        }
+        for zone_key in ZONE_KEYS_ORDER:
+            row[ZONE_LABELS[zone_key]] = _virtual_zone_cell(rec, zone_key)
+        rows.append(row)
 
-    for zone_key in ("Z3", "Z6", "Z10", "Z20", "Z20P"):
-        rows.append(virtual_zone_roi_row("総合", total_by_zone, zone_key))
+        total_rec["N"] += int(rec.get("N", 0) or 0)
+        for zone_key in ZONE_KEYS_ORDER:
+            total_rec[zone_key] += int(rec.get(zone_key, 0) or 0)
 
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df
+    # 元表同様、最後に総合行を置く。
+    total_row = {
+        "ペア": "総合",
+        "対象N": int(total_rec.get("N", 0) or 0),
+    }
+    for zone_key in ZONE_KEYS_ORDER:
+        total_row[ZONE_LABELS[zone_key]] = _virtual_zone_cell(total_rec, zone_key)
+    rows.append(total_row)
 
-    # 見たいゾーンが上に来るように並べる。100%以上→90%以上→的中H→ペア順。
-    df["_roi_sort"] = pd.to_numeric(df["仮想回収率%"], errors="coerce").fillna(-1)
-    df["_hit_sort"] = pd.to_numeric(df["的中H"], errors="coerce").fillna(0)
-    df = df.sort_values(["_roi_sort", "_hit_sort", "ペア", "オッズ帯"], ascending=[False, False, True, True])
-    return df.drop(columns=["_roi_sort", "_hit_sort"])
+    return pd.DataFrame(rows)
+
+
+def _roi_from_virtual_zone_cell(value) -> float | None:
+    """'4本 / 40.0%' から 40.0 を取り出す。"""
+    try:
+        s = str(value).strip()
+        if "/" not in s:
+            return None
+        pct = s.split("/", 1)[1].replace("%", "").strip()
+        if pct in ("", "—", "None"):
+            return None
+        return float(pct)
+    except Exception:
+        return None
 
 
 def highlight_virtual_zone_roi(row: pd.Series) -> pd.Series:
-    """仮想回収率100%以上、90%以上を色付けする。"""
+    """元表対応セル単位で、仮想回収率100%以上、90%以上を色付けする。"""
     styles = pd.Series("", index=row.index)
-    try:
-        roi = float(row.get("仮想回収率%"))
-    except Exception:
-        return styles
-
-    if roi >= 100.0:
-        # 100%以上：強調
-        for col in row.index:
+    for col in ZONE_LABELS.values():
+        if col not in row.index:
+            continue
+        roi = _roi_from_virtual_zone_cell(row.get(col))
+        if roi is None:
+            continue
+        if roi >= 100.0:
             styles[col] = "background-color: #d9ead3; font-weight: 700;"
-    elif roi >= 90.0:
-        # 90%以上：準強調
-        for col in row.index:
+        elif roi >= 90.0:
             styles[col] = "background-color: #e3f2fd; font-weight: 600;"
     return styles
 
 
 def render_virtual_zone_roi_table(df: pd.DataFrame, height: int | None = None) -> None:
-    """個別2車複ゾーン別 仮想回収率表。"""
+    """個別2車複ゾーン別 仮想回収率表。元の的中ゾーン分布と同じ行列形式で表示する。"""
     if df is None or df.empty:
         st.info("表示するデータがありません。")
         return
 
-    h = height if height is not None else min(table_auto_height(df), 900)
+    h = height if height is not None else table_auto_height(df)
     styled = df.style.apply(highlight_virtual_zone_roi, axis=1)
     st.dataframe(
         styled,
@@ -3935,12 +3936,13 @@ with tabs[2]:
 
     st.markdown("### 個別2車複 ゾーン別 仮想回収率")
     st.caption(
-        "実払戻の詳細を持たないため、各ゾーンを中央値で仮想計算します。"
-        "〜3倍=2.5倍、3.1〜6倍=4.5倍、6.1〜10倍=8倍、10.1〜20倍=15倍、20.1倍〜=25倍。"
+        "上の的中ゾーン分布と同じ行・同じ列で対応表示します。"
+        "各セルは『的中本数 / 仮想回収率』です。"
+        "実払戻の詳細を持たないため、〜3倍=2.5倍、3.1〜6倍=4.5倍、6.1〜10倍=8倍、10.1〜20倍=15倍、20.1倍〜=25倍で仮想計算します。"
         "対象Nは、そのペアを全対象レースで1点買いした場合の母数です。"
     )
     df_zone_roi = build_virtual_zone_roi_table(payout_nishafuku_total, NISHAFUKU_PAIRS)
-    zone_roi_cols = ["ペア", "オッズ帯", "対象N", "的中H", "的中率%", "仮想倍率", "仮想払戻", "投資額換算", "仮想回収率%", "判定"]
+    zone_roi_cols = ["ペア", "対象N", "〜3倍", "3.1〜6倍", "6.1〜10倍", "10.1〜20倍", "20.1倍〜"]
     render_virtual_zone_roi_table(df_zone_roi[[c for c in zone_roi_cols if c in df_zone_roi.columns]])
 
     st.divider()
