@@ -737,7 +737,11 @@ def render_virtual_zone_roi_table(df: pd.DataFrame, height: int | None = None) -
         return
 
     h = height if height is not None else table_auto_height(df)
-    styled = df.style.apply(highlight_virtual_zone_roi, axis=1)
+    styled = (
+        df.style
+        .format({"仮想合計回収率%": "{:.1f}"})
+        .apply(highlight_virtual_zone_roi, axis=1)
+    )
     st.dataframe(
         styled,
         use_container_width=True,
