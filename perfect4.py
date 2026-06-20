@@ -1980,7 +1980,16 @@ def render_actual_roi_table(df: pd.DataFrame, height: int | None = None) -> None
     if "判定" in out.columns and "回収率%" in out.columns:
         out["判定"] = out["回収率%"].apply(roi判定_label)
     fmt = {}
-    for col in ["的中率%", "想定ペア的%", "想定回収率%", "回収率%", "想定差", "回収差"]:
+    for col in [
+        "的中率%",
+        "想定ペア的%",
+        "想定回収率%",
+        "回収率%",
+        "想定差",
+        "回収差",
+        "平均配当",
+        "ペア基準配当",
+    ]:
         if col in out.columns:
             fmt[col] = "{:.1f}"
     styled = out.style.apply(highlight_actual_roi_row, axis=1).format(fmt, na_rep="")
