@@ -105,6 +105,36 @@ def add_rec(dst: Dict[str, int], src: Dict[str, int]) -> None:
         dst[key] = int(dst.get(key, 0)) + int(src.get(key, 0))
 
 
+def new_mark_rec() -> Dict[str, int]:
+    return {"N": 0, "C1": 0, "C2": 0, "C3": 0}
+
+
+def add_mark_rec(dst: Dict[str, int], src: Dict[str, int]) -> None:
+    for key in ("N", "C1", "C2", "C3"):
+        dst[key] = int(dst.get(key, 0)) + int(src.get(key, 0))
+
+
+def pct(num: int, den: int):
+    return round(100.0 * int(num) / int(den), 1) if int(den) > 0 else None
+
+
+def mark_rec_to_row(mark: str, rec: Dict[str, int]) -> Dict:
+    n = int(rec.get("N", 0))
+    c1 = int(rec.get("C1", 0))
+    c2 = int(rec.get("C2", 0))
+    c3 = int(rec.get("C3", 0))
+    return {
+        "印": mark,
+        "対象N": n,
+        "1着回数": c1,
+        "2着回数": c2,
+        "3着回数": c3,
+        "1着率%": pct(c1, n),
+        "連対率%": pct(c1 + c2, n),
+        "印着内率%": pct(c1 + c2 + c3, n),
+    }
+
+
 def is_hit(order_marks: Tuple[str, ...], marks: Dict[str, str], finish: List[str]) -> bool:
     if not marks or len(finish) < len(order_marks):
         return False
@@ -222,6 +252,7 @@ with tab_daily:
 # B. 前日までの累積引継ぎ
 # ============================================================
 carry_records = {label: new_rec() for label in ALL_LABELS}
+carry_mark_records = {mark: new_mark_rec() for mark in VELOVI_MARKS}
 
 with tab_carry:
     st.subheader("前日までの集計（累積・引継ぎ）")
@@ -253,6 +284,25 @@ with tab_carry:
             )
             carry_inputs.append((label, int(n), int(payout_sum), int(h)))
 
+        st.markdown("---")
+        st.markdown("### 印別 入賞回数（累積・引継ぎ）")
+        st.caption(
+            "印着内率を継続するため、前日までの◎○▲△×ごとの対象N・1着・2着・3着回数を入力します。"
+        )
+        mhdr = st.columns([1.2, 1.0, 1.0, 1.0, 1.0])
+        for col, title in zip(mhdr, ["印", "対象N", "1着", "2着", "3着"]):
+            col.markdown(f"**{title}**")
+
+        carry_mark_inputs = []
+        for mark in VELOVI_MARKS:
+            m0, m1, m2, m3, m4 = st.columns([1.2, 1.0, 1.0, 1.0, 1.0])
+            m0.markdown(f"**{mark}**")
+            n = m1.number_input("対象N", min_value=0, value=0, step=1, key=f"carry_mark_n_{mark}", label_visibility="collapsed")
+            c1 = m2.number_input("1着", min_value=0, value=0, step=1, key=f"carry_mark_c1_{mark}", label_visibility="collapsed")
+            c2 = m3.number_input("2着", min_value=0, value=0, step=1, key=f"carry_mark_c2_{mark}", label_visibility="collapsed")
+            c3 = m4.number_input("3着", min_value=0, value=0, step=1, key=f"carry_mark_c3_{mark}", label_visibility="collapsed")
+            carry_mark_inputs.append((mark, int(n), int(c1), int(c2), int(c3)))
+
         st.form_submit_button("前日までの集計を反映")
 
     for label, n, payout_sum, h in carry_inputs:
@@ -264,10 +314,19 @@ with tab_carry:
         if h > n:
             st.warning(f"{label}: 的中H({h}) が対象N({n})を超えています。")
 
+    for mark, n, c1, c2, c3 in carry_mark_inputs:
+        carry_mark_records[mark]["N"] = n
+        carry_mark_records[mark]["C1"] = c1
+        carry_mark_records[mark]["C2"] = c2
+        carry_mark_records[mark]["C3"] = c3
+        if c1 + c2 + c3 > n:
+            st.warning(f"{mark}: 1〜3着回数合計({c1 + c2 + c3}) が対象N({n})を超えています。")
+
 # ============================================================
 # C. 日次集計
 # ============================================================
 daily_records = {label: new_rec() for label in ALL_LABELS}
+daily_mark_records = {mark: new_mark_rec() for mark in VELOVI_MARKS}
 valid_races = 0
 warnings: List[str] = []
 race_details: List[Dict] = []
@@ -294,6 +353,15 @@ for row in daily_rows:
 
     valid_races += 1
     hit_labels: List[str] = []
+
+    # 印別の1着・2着・3着・着内率を自動集計
+    car_to_mark = {car: mark for mark, car in marks.items()}
+    for mark in VELOVI_MARKS:
+        daily_mark_records[mark]["N"] += 1
+    for pos, car in enumerate(finish[:3], start=1):
+        mark = car_to_mark.get(car)
+        if mark in daily_mark_records:
+            daily_mark_records[mark][f"C{pos}"] += 1
 
     for label, order_marks in ALL_BETS:
         rec = daily_records[label]
@@ -332,6 +400,11 @@ for label in ALL_LABELS:
     add_rec(total_records[label], carry_records[label])
     add_rec(total_records[label], daily_records[label])
 
+total_mark_records = {mark: new_mark_rec() for mark in VELOVI_MARKS}
+for mark in VELOVI_MARKS:
+    add_mark_rec(total_mark_records[mark], carry_mark_records[mark])
+    add_mark_rec(total_mark_records[mark], daily_mark_records[mark])
+
 # ============================================================
 # E. 集計結果
 # ============================================================
@@ -342,6 +415,17 @@ with tab_result:
         "各買い目は1レース1点100円で計算します。"
     )
 
+    st.subheader("印別 入賞率｜累積")
+    st.caption("◎○▲△×それぞれについて、前日までの引継ぎ＋本日入力から1着率・連対率・印着内率を集計します。")
+    mark_df = pd.DataFrame([mark_rec_to_row(mark, total_mark_records[mark]) for mark in VELOVI_MARKS])
+    mark_style = mark_df.style.format(
+        {"1着率%": "{:.1f}", "連対率%": "{:.1f}", "印着内率%": "{:.1f}"},
+        na_rep="—",
+    )
+    st.dataframe(mark_style, use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.subheader("買い目別｜累積 的中率・回収率")
     total_df = pd.DataFrame([rec_to_row(label, total_records[label]) for label in ALL_LABELS])
     st.dataframe(style_roi(total_df), use_container_width=True, hide_index=True)
 
@@ -361,6 +445,17 @@ with tab_result:
     st.dataframe(style_roi(set_df[set_cols]), use_container_width=True, hide_index=True)
 
     with st.expander("本日分だけの成績を見る"):
+        st.markdown("#### 印別 入賞率（本日分）")
+        daily_mark_df = pd.DataFrame([mark_rec_to_row(mark, daily_mark_records[mark]) for mark in VELOVI_MARKS])
+        st.dataframe(
+            daily_mark_df.style.format(
+                {"1着率%": "{:.1f}", "連対率%": "{:.1f}", "印着内率%": "{:.1f}"},
+                na_rep="—",
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.markdown("#### 買い目別（本日分）")
         daily_df = pd.DataFrame([rec_to_row(label, daily_records[label]) for label in ALL_LABELS])
         st.dataframe(style_roi(daily_df), use_container_width=True, hide_index=True)
 
