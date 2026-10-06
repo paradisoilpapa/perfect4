@@ -71,15 +71,21 @@ def clean_digits(value: str) -> str:
 
 def parse_markline(value: str) -> Dict[str, str]:
     """
-    ◎○▲△×の順に5車を入力。
-    例：41632 = ◎4 / ○1 / ▲6 / △3 / ×2
+    印順を解析する。
+
+    4車入力：◎○▲△
+      例 4163 = ◎4 / ○1 / ▲6 / △3
+      → ×は未入力として扱い、×を使う買い目・×の印着内率だけ当該Rを対象外にする。
+
+    5車入力：◎○▲△×
+      例 41632 = ◎4 / ○1 / ▲6 / △3 / ×2
     """
     s = clean_digits(value)
-    if len(s) != 5 or len(set(s)) != 5:
+    if len(s) not in (4, 5) or len(set(s)) != len(s):
         return {}
     if any(ch == "0" for ch in s):
         return {}
-    return dict(zip(VELOVI_MARKS, list(s)))
+    return dict(zip(VELOVI_MARKS[:len(s)], list(s)))
 
 
 def parse_finish(value: str) -> List[str]:
@@ -137,6 +143,9 @@ def mark_rec_to_row(mark: str, rec: Dict[str, int]) -> Dict:
 
 def is_hit(order_marks: Tuple[str, ...], marks: Dict[str, str], finish: List[str]) -> bool:
     if not marks or len(finish) < len(order_marks):
+        return False
+    # 未入力印（例：×）を含む買い目は判定不能なのでFalse。
+    if any(m not in marks for m in order_marks):
         return False
     expected = [marks[m] for m in order_marks]
     return finish[: len(order_marks)] == expected
@@ -215,14 +224,16 @@ tab_daily, tab_carry, tab_result = st.tabs(
 with tab_daily:
     st.caption(
         "日次入力は『印順・着順・2車単・3連単』が基本です。"
-        " 印順は ◎○▲△× の順に5車を入力します。例：41632 = ◎4 / ○1 / ▲6 / △3 / ×2。"
+        " 印順は ◎○▲△ の4車でも、◎○▲△× の5車でも入力できます。"
+        " 例：4163 = ◎4 / ○1 / ▲6 / △3、41632 = ×2まで入力。"
+        " ×未入力時は、×を使う集計だけ当該Rを対象外にします。"
         " 払戻は100円あたりの実払戻額です。"
         " 落車・失格などで通常評価から外したいレースは『集計除外』にチェックしてください。"
     )
 
     with st.form("daily_input_form"):
         header = st.columns([0.55, 1.6, 1.1, 1.0, 1.0, 0.85])
-        for col, title in zip(header, ["R", "印順 ◎○▲△×", "着順", "2車単", "3連単", "集計除外"]):
+        for col, title in zip(header, ["R", "印順 ◎○▲△（×任意）", "着順", "2車単", "3連単", "集計除外"]):
             col.markdown(f"**{title}**")
 
         daily_rows = []
@@ -370,7 +381,7 @@ for row in daily_rows:
     finish = parse_finish(finish_raw)
 
     if not marks:
-        warnings.append(f"R{rid}: 印順は◎○▲△×の順に、重複なし5車で入力してください。例 41632")
+        warnings.append(f"R{rid}: 印順は◎○▲△の4車、または◎○▲△×の5車を重複なしで入力してください。例 4163 / 41632")
         continue
     if len(finish) < 3:
         warnings.append(f"R{rid}: 着順は3着まで入力してください。例 463 または 4-6-3")
@@ -379,9 +390,10 @@ for row in daily_rows:
     valid_races += 1
     hit_labels: List[str] = []
 
-    # 印別の1着・2着・3着・着内率を自動集計
+    # 印別の1着・2着・3着・着内率を自動集計。
+    # ×未入力時は×だけ対象Nに加えず、◎○▲△は通常どおり集計する。
     car_to_mark = {car: mark for mark, car in marks.items()}
-    for mark in VELOVI_MARKS:
+    for mark in marks.keys():
         daily_mark_records[mark]["N"] += 1
     for pos, car in enumerate(finish[:3], start=1):
         mark = car_to_mark.get(car)
@@ -389,6 +401,10 @@ for row in daily_rows:
             daily_mark_records[mark][f"C{pos}"] += 1
 
     for label, order_marks in ALL_BETS:
+        # ×など、そのレースで未入力の印を使う買い目は対象Nにも入れない。
+        if any(mark not in marks for mark in order_marks):
+            continue
+
         rec = daily_records[label]
         rec["N"] += 1
         rec["KSUM"] += 1
