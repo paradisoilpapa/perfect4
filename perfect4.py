@@ -214,19 +214,20 @@ tab_daily, tab_carry, tab_result = st.tabs(
 # ============================================================
 with tab_daily:
     st.caption(
-        "日次入力は『印順・着順・2車単・3連単』だけです。"
+        "日次入力は『印順・着順・2車単・3連単』が基本です。"
         " 印順は ◎○▲△× の順に5車を入力します。例：41632 = ◎4 / ○1 / ▲6 / △3 / ×2。"
         " 払戻は100円あたりの実払戻額です。"
+        " 落車・失格などで通常評価から外したいレースは『集計除外』にチェックしてください。"
     )
 
     with st.form("daily_input_form"):
-        header = st.columns([0.55, 1.6, 1.1, 1.0, 1.0])
-        for col, title in zip(header, ["R", "印順 ◎○▲△×", "着順", "2車単", "3連単"]):
+        header = st.columns([0.55, 1.6, 1.1, 1.0, 1.0, 0.85])
+        for col, title in zip(header, ["R", "印順 ◎○▲△×", "着順", "2車単", "3連単", "集計除外"]):
             col.markdown(f"**{title}**")
 
         daily_rows = []
         for i in range(1, 101):
-            c1, c2, c3, c4, c5 = st.columns([0.55, 1.6, 1.1, 1.0, 1.0])
+            c1, c2, c3, c4, c5, c6 = st.columns([0.55, 1.6, 1.1, 1.0, 1.0, 0.85])
             rid = c1.text_input("R", value=str(i), key=f"rid_{i}", label_visibility="collapsed")
             markline = c2.text_input("印順", value="", key=f"mark_{i}", label_visibility="collapsed")
             finish = c3.text_input("着順", value="", key=f"fin_{i}", label_visibility="collapsed")
@@ -236,6 +237,9 @@ with tab_daily:
             pay_3t = c5.number_input(
                 "3連単", min_value=0, value=0, step=10, key=f"pay3t_{i}", label_visibility="collapsed"
             )
+            exclude = c6.checkbox(
+                "除外", value=False, key=f"exclude_{i}", label_visibility="collapsed"
+            )
             daily_rows.append(
                 {
                     "race": rid,
@@ -243,6 +247,7 @@ with tab_daily:
                     "finish_raw": finish,
                     "pay_2t": int(pay_2t),
                     "pay_3t": int(pay_3t),
+                    "exclude": bool(exclude),
                 }
             )
 
@@ -328,6 +333,7 @@ with tab_carry:
 daily_records = {label: new_rec() for label in ALL_LABELS}
 daily_mark_records = {mark: new_mark_rec() for mark in VELOVI_MARKS}
 valid_races = 0
+excluded_races = 0
 warnings: List[str] = []
 race_details: List[Dict] = []
 
@@ -337,8 +343,27 @@ for row in daily_rows:
     finish_raw = str(row["finish_raw"]).strip()
     pay_2t = int(row["pay_2t"])
     pay_3t = int(row["pay_3t"])
+    exclude = bool(row.get("exclude", False))
 
-    if not any([mark_raw, finish_raw, pay_2t > 0, pay_3t > 0]):
+    if not any([mark_raw, finish_raw, pay_2t > 0, pay_3t > 0, exclude]):
+        continue
+
+    # 落車・失格などの集計除外レースは、入力内容をレース別確認に残すが、
+    # 対象N・的中率・回収率・印着内率・セット集計のすべてから除外する。
+    if exclude:
+        excluded_races += 1
+        finish_ex = parse_finish(finish_raw)
+        race_details.append(
+            {
+                "R": rid,
+                "印順": mark_raw,
+                "着順": "-".join(finish_ex[:3]) if finish_ex else finish_raw,
+                "2車単払戻": pay_2t,
+                "3連単払戻": pay_3t,
+                "集計除外": "除外",
+                "的中買い目": "集計除外",
+            }
+        )
         continue
 
     marks = parse_markline(mark_raw)
@@ -388,6 +413,7 @@ for row in daily_rows:
             "着順": "-".join(finish[:3]),
             "2車単払戻": pay_2t,
             "3連単払戻": pay_3t,
+            "集計除外": "",
             "的中買い目": " / ".join(hit_labels) if hit_labels else "なし",
         }
     )
@@ -411,7 +437,8 @@ for mark in VELOVI_MARKS:
 with tab_result:
     st.subheader("買い目別｜累積 的中率・回収率")
     st.caption(
-        f"本日有効入力 {valid_races}R。前日までの引継ぎと本日入力を合算した累積成績です。"
+        f"本日有効入力 {valid_races}R／集計除外 {excluded_races}R。前日までの引継ぎと本日入力を合算した累積成績です。"
+        "集計除外にチェックしたレースは対象N・的中率・回収率・印着内率・セット集計のすべてから除外します。"
         "各買い目は1レース1点100円で計算します。"
     )
 
