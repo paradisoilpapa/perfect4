@@ -100,6 +100,11 @@ def new_rec() -> Dict[str, int]:
     return {"N": 0, "H": 0, "SUM": 0, "KSUM": 0}
 
 
+def add_rec(dst: Dict[str, int], src: Dict[str, int]) -> None:
+    for key in ("N", "H", "SUM", "KSUM"):
+        dst[key] = int(dst.get(key, 0)) + int(src.get(key, 0))
+
+
 def is_hit(order_marks: Tuple[str, ...], marks: Dict[str, str], finish: List[str]) -> bool:
     if not marks or len(finish) < len(order_marks):
         return False
@@ -127,6 +132,20 @@ def rec_to_row(label: str, rec: Dict[str, int]) -> Dict:
     }
 
 
+def combine_recs(records: Dict[str, Dict[str, int]], labels: List[str]) -> Dict[str, int]:
+    """
+    同一レース群に対するセット集計。
+    Nは各買い目の最大Nを使用し、購入点数・的中数・払戻を合算する。
+    """
+    recs = [records[label] for label in labels]
+    out = new_rec()
+    out["N"] = max((int(r.get("N", 0)) for r in recs), default=0)
+    out["KSUM"] = sum(int(r.get("KSUM", 0)) for r in recs)
+    out["H"] = sum(int(r.get("H", 0)) for r in recs)
+    out["SUM"] = sum(int(r.get("SUM", 0)) for r in recs)
+    return out
+
+
 def style_roi(df: pd.DataFrame):
     def color_roi(v):
         try:
@@ -139,66 +158,127 @@ def style_roi(df: pd.DataFrame):
             return "background-color: #fff2cc; font-weight: 600;"
         return ""
 
-    return df.style.format({"的中率%": "{:.1f}", "回収率%": "{:.1f}", "平均的中配当": "{:.1f}"}, na_rep="—").map(
-        color_roi, subset=["回収率%"]
+    return (
+        df.style
+        .format(
+            {
+                "的中率%": "{:.1f}",
+                "回収率%": "{:.1f}",
+                "平均的中配当": "{:.1f}",
+            },
+            na_rep="—",
+        )
+        .map(color_roi, subset=["回収率%"])
     )
 
 
 # ============================================================
-# 入力
+# 画面
 # ============================================================
-st.caption(
-    "入力は『印順・着順・2車単・3連単』だけです。"
-    " 印順は ◎○▲△× の順に5車を入力します。例：41632 = ◎4 / ○1 / ▲6 / △3 / ×2。"
-    " 払戻は100円あたりの実払戻額を入力してください。"
+tab_daily, tab_carry, tab_result = st.tabs(
+    ["日次入力", "前日までの集計（引継ぎ）", "集計結果"]
 )
 
-with st.form("daily_input_form"):
-    header = st.columns([0.55, 1.6, 1.1, 1.0, 1.0])
-    for col, title in zip(header, ["R", "印順 ◎○▲△×", "着順", "2車単", "3連単"]):
-        col.markdown(f"**{title}**")
+# ============================================================
+# A. 日次入力
+# ============================================================
+with tab_daily:
+    st.caption(
+        "日次入力は『印順・着順・2車単・3連単』だけです。"
+        " 印順は ◎○▲△× の順に5車を入力します。例：41632 = ◎4 / ○1 / ▲6 / △3 / ×2。"
+        " 払戻は100円あたりの実払戻額です。"
+    )
 
-    rows = []
-    for i in range(1, 101):
-        c1, c2, c3, c4, c5 = st.columns([0.55, 1.6, 1.1, 1.0, 1.0])
-        rid = c1.text_input("R", value=str(i), key=f"rid_{i}", label_visibility="collapsed")
-        markline = c2.text_input("印順", value="", key=f"mark_{i}", label_visibility="collapsed")
-        finish = c3.text_input("着順", value="", key=f"fin_{i}", label_visibility="collapsed")
-        pay_2t = c4.number_input(
-            "2車単", min_value=0, value=0, step=10, key=f"pay2t_{i}", label_visibility="collapsed"
-        )
-        pay_3t = c5.number_input(
-            "3連単", min_value=0, value=0, step=10, key=f"pay3t_{i}", label_visibility="collapsed"
-        )
-        rows.append(
-            {
-                "race": rid,
-                "markline": markline,
-                "finish_raw": finish,
-                "pay_2t": int(pay_2t),
-                "pay_3t": int(pay_3t),
-            }
-        )
+    with st.form("daily_input_form"):
+        header = st.columns([0.55, 1.6, 1.1, 1.0, 1.0])
+        for col, title in zip(header, ["R", "印順 ◎○▲△×", "着順", "2車単", "3連単"]):
+            col.markdown(f"**{title}**")
 
-    submitted = st.form_submit_button("集計する")
+        daily_rows = []
+        for i in range(1, 101):
+            c1, c2, c3, c4, c5 = st.columns([0.55, 1.6, 1.1, 1.0, 1.0])
+            rid = c1.text_input("R", value=str(i), key=f"rid_{i}", label_visibility="collapsed")
+            markline = c2.text_input("印順", value="", key=f"mark_{i}", label_visibility="collapsed")
+            finish = c3.text_input("着順", value="", key=f"fin_{i}", label_visibility="collapsed")
+            pay_2t = c4.number_input(
+                "2車単", min_value=0, value=0, step=10, key=f"pay2t_{i}", label_visibility="collapsed"
+            )
+            pay_3t = c5.number_input(
+                "3連単", min_value=0, value=0, step=10, key=f"pay3t_{i}", label_visibility="collapsed"
+            )
+            daily_rows.append(
+                {
+                    "race": rid,
+                    "markline": markline,
+                    "finish_raw": finish,
+                    "pay_2t": int(pay_2t),
+                    "pay_3t": int(pay_3t),
+                }
+            )
 
+        st.form_submit_button("日次入力を反映")
 
 # ============================================================
-# 集計
+# B. 前日までの累積引継ぎ
 # ============================================================
-records = {label: new_rec() for label in ALL_LABELS}
+carry_records = {label: new_rec() for label in ALL_LABELS}
+
+with tab_carry:
+    st.subheader("前日までの集計（累積・引継ぎ）")
+    st.caption(
+        "前日までの各買い目の『対象N・払戻合計SUM・的中H』を入力します。"
+        "各買い目は1レース1点100円として、購入点数と投資額はNから自動計算します。"
+    )
+
+    with st.form("carryover_form"):
+        hdr = st.columns([2.4, 1.0, 1.3, 1.0])
+        for col, title in zip(hdr, ["買い目", "対象N", "払戻合計SUM", "的中H"]):
+            col.markdown(f"**{title}**")
+
+        carry_inputs = []
+        for label in ALL_LABELS:
+            c0, c1, c2, c3 = st.columns([2.4, 1.0, 1.3, 1.0])
+            c0.markdown(f"**{label}**")
+            n = c1.number_input(
+                "N", min_value=0, value=0, step=1,
+                key=f"carry_n_{label}", label_visibility="collapsed"
+            )
+            payout_sum = c2.number_input(
+                "SUM", min_value=0, value=0, step=10,
+                key=f"carry_sum_{label}", label_visibility="collapsed"
+            )
+            h = c3.number_input(
+                "H", min_value=0, value=0, step=1,
+                key=f"carry_h_{label}", label_visibility="collapsed"
+            )
+            carry_inputs.append((label, int(n), int(payout_sum), int(h)))
+
+        st.form_submit_button("前日までの集計を反映")
+
+    for label, n, payout_sum, h in carry_inputs:
+        carry_records[label]["N"] = int(n)
+        carry_records[label]["KSUM"] = int(n)
+        carry_records[label]["SUM"] = int(payout_sum)
+        carry_records[label]["H"] = int(h)
+
+        if h > n:
+            st.warning(f"{label}: 的中H({h}) が対象N({n})を超えています。")
+
+# ============================================================
+# C. 日次集計
+# ============================================================
+daily_records = {label: new_rec() for label in ALL_LABELS}
 valid_races = 0
 warnings: List[str] = []
 race_details: List[Dict] = []
 
-for row in rows:
+for row in daily_rows:
     rid = str(row["race"]).strip()
     mark_raw = str(row["markline"]).strip()
     finish_raw = str(row["finish_raw"]).strip()
     pay_2t = int(row["pay_2t"])
     pay_3t = int(row["pay_3t"])
 
-    # 完全未入力行は無視。
     if not any([mark_raw, finish_raw, pay_2t > 0, pay_3t > 0]):
         continue
 
@@ -212,12 +292,11 @@ for row in rows:
         warnings.append(f"R{rid}: 着順は3着まで入力してください。例 463 または 4-6-3")
         continue
 
-    # 印に使った車番と実着順の車番が矛盾していても、無印車が3着内に入ることはあるため許容。
     valid_races += 1
-
     hit_labels: List[str] = []
+
     for label, order_marks in ALL_BETS:
-        rec = records[label]
+        rec = daily_records[label]
         rec["N"] += 1
         rec["KSUM"] += 1
 
@@ -245,59 +324,57 @@ for row in rows:
         }
     )
 
+# ============================================================
+# D. 累積 = 引継ぎ + 日次
+# ============================================================
+total_records = {label: new_rec() for label in ALL_LABELS}
+for label in ALL_LABELS:
+    add_rec(total_records[label], carry_records[label])
+    add_rec(total_records[label], daily_records[label])
 
 # ============================================================
-# 結果
+# E. 集計結果
 # ============================================================
-st.divider()
-st.subheader("買い目別｜的中率・回収率")
-st.caption(f"有効入力 {valid_races}R。各買い目を毎レース1点100円で購入したものとして集計します。")
-
-individual_df = pd.DataFrame([rec_to_row(label, records[label]) for label in ALL_LABELS])
-st.dataframe(style_roi(individual_df), use_container_width=True, hide_index=True)
-
-st.subheader("セット集計｜的中率・回収率")
-set_rows = []
-for set_label, labels in SET_SPECS:
-    n = valid_races
-    points_per_race = len(labels)
-    ksum = n * points_per_race
-    investment = ksum * 100
-    payout_sum = sum(records[label]["SUM"] for label in labels)
-
-    # 同一券種・完全一致型なので、同じレースでセット内複数点が同時的中することはない。
-    hits = sum(records[label]["H"] for label in labels)
-
-    set_rows.append(
-        {
-            "買い目": set_label,
-            "対象R": n,
-            "1R点数": points_per_race,
-            "購入点数": ksum,
-            "投資額": investment,
-            "的中数": hits,
-            "的中率%": round(hits / n * 100.0, 1) if n else None,
-            "払戻合計": payout_sum,
-            "平均的中配当": round(payout_sum / hits, 1) if hits else None,
-            "回収率%": round(payout_sum / investment * 100.0, 1) if investment else None,
-        }
+with tab_result:
+    st.subheader("買い目別｜累積 的中率・回収率")
+    st.caption(
+        f"本日有効入力 {valid_races}R。前日までの引継ぎと本日入力を合算した累積成績です。"
+        "各買い目は1レース1点100円で計算します。"
     )
 
-set_df = pd.DataFrame(set_rows)
-st.dataframe(style_roi(set_df), use_container_width=True, hide_index=True)
+    total_df = pd.DataFrame([rec_to_row(label, total_records[label]) for label in ALL_LABELS])
+    st.dataframe(style_roi(total_df), use_container_width=True, hide_index=True)
 
-if warnings:
-    st.warning("\n".join(warnings[:20]) + ("\n…" if len(warnings) > 20 else ""))
+    st.subheader("セット集計｜累積 的中率・回収率")
+    set_rows = []
+    for set_label, labels in SET_SPECS:
+        rec = combine_recs(total_records, labels)
+        row = rec_to_row(set_label, rec)
+        row["1R点数"] = len(labels)
+        set_rows.append(row)
 
-if race_details:
-    with st.expander("レース別判定を確認"):
-        st.dataframe(pd.DataFrame(race_details), use_container_width=True, hide_index=True)
+    set_df = pd.DataFrame(set_rows)
+    set_cols = [
+        "買い目", "対象R", "1R点数", "購入点数", "投資額",
+        "的中数", "的中率%", "払戻合計", "平均的中配当", "回収率%"
+    ]
+    st.dataframe(style_roi(set_df[set_cols]), use_container_width=True, hide_index=True)
 
-# CSV出力
-if not individual_df.empty:
-    st.download_button(
-        "買い目別集計CSVをダウンロード",
-        data=individual_df.to_csv(index=False).encode("utf-8-sig"),
-        file_name="velovi_bet_summary.csv",
-        mime="text/csv",
-    )
+    with st.expander("本日分だけの成績を見る"):
+        daily_df = pd.DataFrame([rec_to_row(label, daily_records[label]) for label in ALL_LABELS])
+        st.dataframe(style_roi(daily_df), use_container_width=True, hide_index=True)
+
+    if warnings:
+        st.warning("\n".join(warnings[:20]) + ("\n…" if len(warnings) > 20 else ""))
+
+    if race_details:
+        with st.expander("本日のレース別判定を確認"):
+            st.dataframe(pd.DataFrame(race_details), use_container_width=True, hide_index=True)
+
+    if not total_df.empty:
+        st.download_button(
+            "累積・買い目別集計CSVをダウンロード",
+            data=total_df.to_csv(index=False).encode("utf-8-sig"),
+            file_name="velovi_bet_summary_total.csv",
+            mime="text/csv",
+        )
