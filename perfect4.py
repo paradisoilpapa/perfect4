@@ -285,6 +285,64 @@ def rank_symbol(r: int) -> str:
     return RANK_SYMBOLS.get(r, f"評価{r}")
 
 
+
+# =========================
+# 現行ヴェロビ（印ベース）集計
+# =========================
+# 日次入力の「印順」は ◎○▲△× の順に車番を5桁で入力する。
+# 例：41632 = ◎4 / ○1 / ▲6 / △3 / ×2
+VELOVI_MARKS = ("◎", "○", "▲", "△", "×")
+
+# 現行の基本買い目。各1点100円で仮想購入して的中率・回収率を集計する。
+CURRENT_2T_BETS = [
+    ("2車単 ◎-▲", ("◎", "▲")),
+    ("2車単 ○-◎", ("○", "◎")),
+    ("2車単 ▲-◎", ("▲", "◎")),
+    ("2車単 ◎-○", ("◎", "○")),
+]
+CURRENT_3T_BETS = [
+    ("3連単 ◎-▲-△", ("◎", "▲", "△")),
+    ("3連単 ◎-▲-×", ("◎", "▲", "×")),
+    ("3連単 ◎-○-▲", ("◎", "○", "▲")),
+    ("3連単 ◎-○-△", ("◎", "○", "△")),
+    ("3連単 ◎-○-×", ("◎", "○", "×")),
+    ("3連単 ◎-▲-○", ("◎", "▲", "○")),
+]
+
+CURRENT_BET_LABELS = [label for label, _ in CURRENT_2T_BETS + CURRENT_3T_BETS]
+CURRENT_2T_MAIN_LABELS = ["2車単 ◎-▲", "2車単 ○-◎", "2車単 ▲-◎"]
+CURRENT_2T_WITH_CIRCLE_LABELS = CURRENT_2T_MAIN_LABELS + ["2車単 ◎-○"]
+CURRENT_3T_MAIN_LABELS = ["3連単 ◎-▲-△", "3連単 ◎-▲-×"]
+CURRENT_3T_CIRCLE_LABELS = ["3連単 ◎-○-▲", "3連単 ◎-○-△", "3連単 ◎-○-×"]
+CURRENT_3T_REVERSE_LABELS = ["3連単 ◎-▲-○"]
+CURRENT_3T_ALL_LABELS = CURRENT_3T_MAIN_LABELS + CURRENT_3T_CIRCLE_LABELS + CURRENT_3T_REVERSE_LABELS
+
+
+def parse_markline(s: str, vorder: List[str]) -> Dict[str, str]:
+    """◎○▲△×の順に並べた5桁の車番を印辞書へ変換する。"""
+    if not s:
+        return {}
+    s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
+    if not s.isdigit() or len(s) != len(VELOVI_MARKS):
+        return {}
+    cars = list(s)
+    if len(set(cars)) != len(cars):
+        return {}
+    if vorder and any(car not in set(vorder) for car in cars):
+        return {}
+    return {mark: car for mark, car in zip(VELOVI_MARKS, cars)}
+
+
+def current_bet_hit(order_marks: Tuple[str, ...], marks: Dict[str, str], finish: List[str]) -> bool:
+    """印買い目が実着順と完全一致したか。"""
+    if not marks or len(finish) < len(order_marks):
+        return False
+    expected = [marks.get(m) for m in order_marks]
+    if any(x is None for x in expected):
+        return False
+    return finish[:len(order_marks)] == expected
+
+
 PairKey = Tuple[int, int]  # (winner_eval, second_eval)
 
 
@@ -3353,50 +3411,56 @@ zone_median_carryover_manual: Dict[str, Dict[str, float]] = {
 
 
 
+# 前日まで：現行ヴェロビ印買い目（個別）
+agg_current_bets_manual: Dict[str, Dict[str, int]] = {
+    label: new_payout_rec() for label in CURRENT_BET_LABELS
+}
+
+
 # =========================
 # A. 日次手入力（欠車対応）
 # =========================
 with tabs[0]:
-    st.subheader("日次手入力（7車ベース・欠車対応・最大100R）")
+    st.subheader("日次手入力（現行ヴェロビ対応・最大100R）")
     st.caption(
-        "入力中の白化を抑えるため、フォーム送信式です。"
-        "V評価は頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。"
-        "着順は～3桁。2車複配当のみ入力します。"
-        "三連複は実配当入力を使わず、評価別3着内率×カバー率から必要平均払戻を算出します。"
+        "V評価は従来集計用に残しています。"
+        "現行ヴェロビ集計は「印順」に ◎○▲△× の順で5車を入力します。"
+        "例：41632 = ◎4 / ○1 / ▲6 / △3 / ×2。"
+        "着順は～3桁、2車単・3連単は100円払戻額を入力してください。"
     )
 
     with st.form("daily_input_form"):
-        cols_hdr = st.columns([0.7, 0.8, 2.8, 1.0, 1.0])
-        cols_hdr[0].markdown("**R**")
-        cols_hdr[1].markdown("**頭数**")
-        cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
-        cols_hdr[3].markdown("**着順(～3桁)**")
-        cols_hdr[4].markdown("**2車複**")
+        cols_hdr = st.columns([0.55, 0.7, 1.8, 1.45, 0.9, 0.9, 0.9, 0.9])
+        headers = ["**R**", "**頭数**", "**V評価**", "**印順 ◎○▲△×**", "**着順**", "**2車複**", "**2車単**", "**3連単**"]
+        for c, h in zip(cols_hdr, headers):
+            c.markdown(h)
 
         daily_inputs = []
 
         for i in range(1, 101):
-            c1, c2, c3, c4, c5 = st.columns([0.7, 0.8, 2.8, 1.0, 1.0])
+            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([0.55, 0.7, 1.8, 1.45, 0.9, 0.9, 0.9, 0.9])
 
             rid = c1.text_input("", key=f"rid_{i}", value=str(i))
             field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
             vline = c3.text_input("", key=f"vline_{i}", value="")
-            fin = c4.text_input("", key=f"fin_{i}", value="")
-            pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
+            markline = c4.text_input("", key=f"markline_{i}", value="")
+            fin = c5.text_input("", key=f"fin_{i}", value="")
+            pay_2f = c6.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
+            pay_2t = c7.number_input("", key=f"pay2t_{i}", min_value=0, value=0, step=10)
+            pay_3t = c8.number_input("", key=f"pay3t_{i}", min_value=0, value=0, step=10)
             pay_3f = 0
-            pay_2t = 0
 
-            daily_inputs.append(
-                {
-                    "rid": rid,
-                    "field_n": field_n,
-                    "vline": vline,
-                    "fin": fin,
-                    "pay_2t": pay_2t,
-                    "pay_2f": pay_2f,
-                    "pay_3f": pay_3f,
-                }
-            )
+            daily_inputs.append({
+                "rid": rid,
+                "field_n": field_n,
+                "vline": vline,
+                "markline": markline,
+                "fin": fin,
+                "pay_2t": pay_2t,
+                "pay_2f": pay_2f,
+                "pay_3t": pay_3t,
+                "pay_3f": pay_3f,
+            })
 
         st.form_submit_button("日次入力を反映")
 
@@ -3404,14 +3468,16 @@ with tabs[0]:
         rid = item["rid"]
         field_n = int(item["field_n"])
         vline = item["vline"]
+        markline = item.get("markline", "")
         fin = item["fin"]
         pay_2t = int(item["pay_2t"])
         pay_2f = int(item["pay_2f"])
+        pay_3t = int(item.get("pay_3t", 0))
         pay_3f = int(item.get("pay_3f", 0))
         vorder = parse_rankline(vline, field_n)
         finish = parse_finish(fin)
 
-        any_input = any([vline.strip(), fin.strip(), pay_2f > 0])
+        any_input = any([vline.strip(), markline.strip(), fin.strip(), pay_2f > 0, pay_2t > 0, pay_3t > 0])
         if any_input:
             if not vorder:
                 st.warning(f"R{rid}: 頭数{field_n}なので、V評価は{field_n}桁で入力してください。")
@@ -3425,14 +3491,24 @@ with tabs[0]:
                     " 欠車/入力ミスの可能性があります。"
                 )
 
+            marks = parse_markline(markline, vorder) if markline.strip() else {}
+            if markline.strip() and not marks:
+                st.warning(
+                    f"R{rid}: 印順は ◎○▲△× の順に重複なし5桁で入力し、"
+                    "すべてV評価内の車番にしてください。例：41632"
+                )
+
             byrace_rows.append(
                 {
                     "race": rid,
                     "field_n": field_n,
                     "vorder": vorder,
+                    "marks": marks,
+                    "markline": markline,
                     "finish": finish,
                     "pay_2t": pay_2t,
                     "pay_2f": pay_2f,
+                    "pay_3t": pay_3t,
                     "pay_3f": pay_3f,
                 }
             )
@@ -3618,6 +3694,22 @@ with tabs[1]:
 
         st.divider()
 
+        st.divider()
+
+        st.markdown("## 現行ヴェロビ印買い目 引継ぎ入力（累積）")
+        st.caption(
+            "前日までの各1点買い目の対象N・払戻合計SUM・的中Hを入力します。"
+            "個別買い目の投資額は N×100円で自動計算します。"
+        )
+        current_bet_manual_inputs = []
+        for label in CURRENT_BET_LABELS:
+            cc = st.columns([2.2, 1.0, 1.2, 1.0])
+            cc[0].markdown(f"**{label}**")
+            n = cc[1].number_input("N", min_value=0, value=0, step=1, key=f"cur_n_{label}")
+            sm = cc[2].number_input("SUM", min_value=0, value=0, step=10, key=f"cur_sum_{label}")
+            h = cc[3].number_input("H", min_value=0, value=0, step=1, key=f"cur_h_{label}")
+            current_bet_manual_inputs.append((label, n, sm, h))
+
         # 集計結果に出さない旧検証用の引継ぎ入力欄は削除。
         # 残す引継ぎ入力は、評価別・1→2着・1着3着・2着3着・個別2車複だけ。
 
@@ -3666,6 +3758,14 @@ with tabs[1]:
         if zkey in zone_median_carryover_manual and med_n > 0 and med_val > 0:
             zone_median_carryover_manual[zkey]["N"] = int(med_n)
             zone_median_carryover_manual[zkey]["median"] = float(med_val)
+
+    for label, N, SUM, H in current_bet_manual_inputs:
+        if label in agg_current_bets_manual and any([N, SUM, H]):
+            rec = agg_current_bets_manual[label]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(N)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
 
     # 34-12前日まで分は専用入力を持たせず、既存の個別2車複引継ぎから自動合算する。
     # Nは4点の最大N、KSUM/SUM/Hは4点合計。
@@ -3762,6 +3862,53 @@ for k, v in pair23_daily.items():
     pair23_total[k] += int(v)
 for k, v in pair23_manual.items():
     pair23_total[k] += int(v)
+
+# --- 現行ヴェロビ印買い目（日次） ---
+current_bets_daily: Dict[str, Dict[str, int]] = {
+    label: new_payout_rec() for label in CURRENT_BET_LABELS
+}
+current_missing_payout_warnings: List[str] = []
+
+for row in byrace_rows:
+    marks = row.get("marks", {}) or {}
+    finish = row.get("finish", []) or []
+    if not marks or len(finish) < 2:
+        continue
+
+    pay_2t = int(row.get("pay_2t", 0) or 0)
+    pay_3t = int(row.get("pay_3t", 0) or 0)
+    rid = row.get("race", "")
+
+    for label, order_marks in CURRENT_2T_BETS:
+        rec = current_bets_daily[label]
+        rec["N"] += 1
+        rec["KSUM"] += 1
+        if current_bet_hit(order_marks, marks, finish):
+            rec["H"] += 1
+            if pay_2t > 0:
+                rec["SUM"] += pay_2t
+            else:
+                current_missing_payout_warnings.append(f"R{rid} {label} 的中・2車単払戻未入力")
+
+    if len(finish) >= 3:
+        for label, order_marks in CURRENT_3T_BETS:
+            rec = current_bets_daily[label]
+            rec["N"] += 1
+            rec["KSUM"] += 1
+            if current_bet_hit(order_marks, marks, finish):
+                rec["H"] += 1
+                if pay_3t > 0:
+                    rec["SUM"] += pay_3t
+                else:
+                    current_missing_payout_warnings.append(f"R{rid} {label} 的中・3連単払戻未入力")
+
+current_bets_total: Dict[str, Dict[str, int]] = {
+    label: new_payout_rec() for label in CURRENT_BET_LABELS
+}
+for label in CURRENT_BET_LABELS:
+    add_rec(current_bets_total[label], current_bets_daily[label])
+    add_rec(current_bets_total[label], agg_current_bets_manual[label])
+
 
 # --- 新回収率（日次） ---
 # 2車単：1→23
@@ -4085,6 +4232,44 @@ for label in payout_sanrenpuku12_individual_total.keys():
 # =========================
 with tabs[2]:
     st.markdown('<a id="analysis-result"></a>', unsafe_allow_html=True)
+    st.subheader("現行ヴェロビ｜買い目別 的中率・回収率")
+    st.caption(
+        "印順（◎○▲△×）を基準に、各買い目を対象レースごとに1点100円で仮想購入した累積成績です。"
+        "◎-○に加え、◎-○-▲／◎-○-△／◎-○-×／◎-▲-○も独立して集計します。"
+    )
+
+    current_rows = [payout_row(label, current_bets_total[label]) for label in CURRENT_BET_LABELS]
+    df_current = pd.DataFrame(current_rows)
+    current_cols = [
+        "型", "対象N", "投資額換算", "払戻合計SUM",
+        "的中H", "的中率%", "平均配当", "回収率%"
+    ]
+    render_actual_roi_table(df_current[[c for c in current_cols if c in df_current.columns]])
+
+    st.markdown("### セット集計")
+    set_specs = [
+        ("2車単 推奨3点｜◎-▲ / ○-◎ / ▲-◎", CURRENT_2T_MAIN_LABELS),
+        ("2車単 4点｜推奨3点 + ◎-○", CURRENT_2T_WITH_CIRCLE_LABELS),
+        ("3連単 推奨2点｜◎-▲-△ / ◎-▲-×", CURRENT_3T_MAIN_LABELS),
+        ("3連単 ◎-○流し3点｜◎-○-▲ / ◎-○-△ / ◎-○-×", CURRENT_3T_CIRCLE_LABELS),
+        ("3連単 全6点｜既存2点 + ◎-○流し3点 + ◎-▲-○", CURRENT_3T_ALL_LABELS),
+    ]
+    set_rows = []
+    for set_label, labels in set_specs:
+        rec = combine_recs([current_bets_total[x] for x in labels])
+        set_rows.append(payout_row(set_label, rec))
+    df_current_sets = pd.DataFrame(set_rows)
+    render_actual_roi_table(df_current_sets[[c for c in current_cols if c in df_current_sets.columns]])
+
+    if current_missing_payout_warnings:
+        st.warning(
+            "的中しているのに払戻が未入力の行があります。回収率が過小になります："
+            + " / ".join(current_missing_payout_warnings[:10])
+            + (" ..." if len(current_missing_payout_warnings) > 10 else "")
+        )
+
+    st.divider()
+
     st.subheader("1→2 着評価分布（全体累積）｜1着が評価1〜7のとき（欠車対応）")
     st.caption("欠車レースでは存在しない下位評価はNに含まれません。")
 
