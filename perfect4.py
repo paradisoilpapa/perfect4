@@ -275,13 +275,13 @@ carry_mark_records = {mark: new_mark_rec() for mark in VELOVI_MARKS}
 with tab_carry:
     st.subheader("前日までの集計（累積・引継ぎ）")
     st.caption(
-        "前日までの各買い目の『対象N・払戻合計SUM・的中H』を入力します。"
+        "前日までの各買い目の『対象N・的中H・払戻合計SUM』を入力します。"
         "各買い目は1レース1点100円として、購入点数と投資額はNから自動計算します。"
     )
 
     with st.form("carryover_form"):
         hdr = st.columns([2.4, 1.0, 1.3, 1.0])
-        for col, title in zip(hdr, ["買い目", "対象N", "払戻合計SUM", "的中H"]):
+        for col, title in zip(hdr, ["買い目", "対象N", "的中H", "払戻合計SUM"]):
             col.markdown(f"**{title}**")
 
         carry_inputs = []
@@ -292,13 +292,13 @@ with tab_carry:
                 "N", min_value=0, value=0, step=1,
                 key=f"carry_n_{label}", label_visibility="collapsed"
             )
-            payout_sum = c2.number_input(
-                "SUM", min_value=0, value=0, step=10,
-                key=f"carry_sum_{label}", label_visibility="collapsed"
-            )
-            h = c3.number_input(
+            h = c2.number_input(
                 "H", min_value=0, value=0, step=1,
                 key=f"carry_h_{label}", label_visibility="collapsed"
+            )
+            payout_sum = c3.number_input(
+                "SUM", min_value=0, value=0, step=10,
+                key=f"carry_sum_{label}", label_visibility="collapsed"
             )
             carry_inputs.append((label, int(n), int(payout_sum), int(h)))
 
