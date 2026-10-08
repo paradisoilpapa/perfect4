@@ -213,6 +213,17 @@ def style_roi(df: pd.DataFrame):
     )
 
 
+def show_full_table(data, *, hide_index=True):
+    """集計表を行数に合わせて表示し、表内の縦スクロールをなくす。"""
+    row_count = len(data.data) if isinstance(data, pd.io.formats.style.Styler) else len(data)
+    st.dataframe(
+        data,
+        use_container_width=True,
+        hide_index=hide_index,
+        height=max(110, 39 + row_count * 36),
+    )
+
+
 # ============================================================
 # 画面
 # ============================================================
@@ -467,12 +478,12 @@ with tab_result:
         {"1着率%": "{:.1f}", "連対率%": "{:.1f}", "印着内率%": "{:.1f}"},
         na_rep="—",
     )
-    st.dataframe(mark_style, use_container_width=True, hide_index=True)
+    show_full_table(mark_style)
 
     st.divider()
     st.subheader("買い目別｜累積 的中率・回収率")
     total_df = pd.DataFrame([rec_to_row(label, total_records[label]) for label in ALL_LABELS])
-    st.dataframe(style_roi(total_df), use_container_width=True, hide_index=True)
+    show_full_table(style_roi(total_df))
 
     st.subheader("セット集計｜累積 的中率・回収率")
     set_rows = []
@@ -487,22 +498,20 @@ with tab_result:
         "買い目", "対象R", "1R点数", "購入点数", "投資額",
         "的中数", "的中率%", "払戻合計", "平均的中配当", "回収率%"
     ]
-    st.dataframe(style_roi(set_df[set_cols]), use_container_width=True, hide_index=True)
+    show_full_table(style_roi(set_df[set_cols]))
 
     with st.expander("本日分だけの成績を見る"):
         st.markdown("#### 印別 入賞率（本日分）")
         daily_mark_df = pd.DataFrame([mark_rec_to_row(mark, daily_mark_records[mark]) for mark in VELOVI_MARKS])
-        st.dataframe(
+        show_full_table(
             daily_mark_df.style.format(
                 {"1着率%": "{:.1f}", "連対率%": "{:.1f}", "印着内率%": "{:.1f}"},
                 na_rep="—",
-            ),
-            use_container_width=True,
-            hide_index=True,
+            )
         )
         st.markdown("#### 買い目別（本日分）")
         daily_df = pd.DataFrame([rec_to_row(label, daily_records[label]) for label in ALL_LABELS])
-        st.dataframe(style_roi(daily_df), use_container_width=True, hide_index=True)
+        show_full_table(style_roi(daily_df))
 
     if warnings:
         st.warning("\n".join(warnings[:20]) + ("\n…" if len(warnings) > 20 else ""))
