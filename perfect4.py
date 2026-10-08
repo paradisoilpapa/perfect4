@@ -19,6 +19,10 @@ CURRENT_2T_BETS: List[Tuple[str, Tuple[str, ...]]] = [
     ("2車単 ◎-△", ("◎", "△")),
     ("2車単 ◎-×", ("◎", "×")),
     ("2車単 ○-◎", ("○", "◎")),
+    ("2車単 ○-▲", ("○", "▲")),
+    ("2車単 △-◎", ("△", "◎")),
+    ("2車単 △-○", ("△", "○")),
+    ("2車単 △-▲", ("△", "▲")),
     ("2車単 ▲-◎", ("▲", "◎")),
 ]
 
@@ -33,33 +37,6 @@ CURRENT_3T_BETS: List[Tuple[str, Tuple[str, ...]]] = [
 
 ALL_BETS = CURRENT_2T_BETS + CURRENT_3T_BETS
 ALL_LABELS = [label for label, _ in ALL_BETS]
-
-CURRENT_2T_MAIN_LABELS = [
-    "2車単 ◎-▲",
-    "2車単 ○-◎",
-    "2車単 ▲-◎",
-]
-CURRENT_2T_ALL_LABELS = CURRENT_2T_MAIN_LABELS + ["2車単 ◎-○"]
-
-CURRENT_3T_MAIN_LABELS = [
-    "3連単 ◎-▲-△",
-    "3連単 ◎-▲-×",
-]
-CURRENT_3T_CIRCLE_LABELS = [
-    "3連単 ◎-○-▲",
-    "3連単 ◎-○-△",
-    "3連単 ◎-○-×",
-]
-CURRENT_3T_ALL_LABELS = CURRENT_3T_MAIN_LABELS + CURRENT_3T_CIRCLE_LABELS + ["3連単 ◎-▲-○"]
-
-SET_SPECS = [
-    ("2車単 推奨3点｜◎-▲ / ○-◎ / ▲-◎", CURRENT_2T_MAIN_LABELS),
-    ("2車単 全4点｜推奨3点 + ◎-○", CURRENT_2T_ALL_LABELS),
-    ("3連単 基本2点｜◎-▲-△ / ◎-▲-×", CURRENT_3T_MAIN_LABELS),
-    ("3連単 ◎-○流し3点｜◎-○-▲ / ◎-○-△ / ◎-○-×", CURRENT_3T_CIRCLE_LABELS),
-    ("3連単 全6点｜基本2点 + ◎-○流し3点 + ◎-▲-○", CURRENT_3T_ALL_LABELS),
-]
-
 
 def clean_digits(value: str) -> str:
     """区切り記号を除き、数字だけを残す。"""
@@ -171,20 +148,6 @@ def rec_to_row(label: str, rec: Dict[str, int]) -> Dict:
         "平均的中配当": round(payout_sum / h, 1) if h else None,
         "回収率%": round(payout_sum / investment * 100.0, 1) if investment else None,
     }
-
-
-def combine_recs(records: Dict[str, Dict[str, int]], labels: List[str]) -> Dict[str, int]:
-    """
-    同一レース群に対するセット集計。
-    Nは各買い目の最大Nを使用し、購入点数・的中数・払戻を合算する。
-    """
-    recs = [records[label] for label in labels]
-    out = new_rec()
-    out["N"] = max((int(r.get("N", 0)) for r in recs), default=0)
-    out["KSUM"] = sum(int(r.get("KSUM", 0)) for r in recs)
-    out["H"] = sum(int(r.get("H", 0)) for r in recs)
-    out["SUM"] = sum(int(r.get("SUM", 0)) for r in recs)
-    return out
 
 
 def style_roi(df: pd.DataFrame):
@@ -373,7 +336,7 @@ for row in daily_rows:
         continue
 
     # 落車・失格などの集計除外レースは、入力内容をレース別確認に残すが、
-    # 対象N・的中率・回収率・印着内率・セット集計のすべてから除外する。
+    # 対象N・的中率・回収率・印着内率のすべてから除外する。
     if exclude:
         excluded_races += 1
         finish_ex = parse_finish(finish_raw)
@@ -467,7 +430,7 @@ with tab_result:
     st.subheader("買い目別｜累積 的中率・回収率")
     st.caption(
         f"本日有効入力 {valid_races}R／集計除外 {excluded_races}R。前日までの引継ぎと本日入力を合算した累積成績です。"
-        "集計除外にチェックしたレースは対象N・的中率・回収率・印着内率・セット集計のすべてから除外します。"
+        "集計除外にチェックしたレースは対象N・的中率・回収率・印着内率のすべてから除外します。"
         "各買い目は1レース1点100円で計算します。"
     )
 
@@ -484,21 +447,6 @@ with tab_result:
     st.subheader("買い目別｜累積 的中率・回収率")
     total_df = pd.DataFrame([rec_to_row(label, total_records[label]) for label in ALL_LABELS])
     show_full_table(style_roi(total_df))
-
-    st.subheader("セット集計｜累積 的中率・回収率")
-    set_rows = []
-    for set_label, labels in SET_SPECS:
-        rec = combine_recs(total_records, labels)
-        row = rec_to_row(set_label, rec)
-        row["1R点数"] = len(labels)
-        set_rows.append(row)
-
-    set_df = pd.DataFrame(set_rows)
-    set_cols = [
-        "買い目", "対象R", "1R点数", "購入点数", "投資額",
-        "的中数", "的中率%", "払戻合計", "平均的中配当", "回収率%"
-    ]
-    show_full_table(style_roi(set_df[set_cols]))
 
     with st.expander("本日分だけの成績を見る"):
         st.markdown("#### 印別 入賞率（本日分）")
