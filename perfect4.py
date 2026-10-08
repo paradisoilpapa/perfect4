@@ -46,6 +46,15 @@ FULL_2F_BETS = [
 ]
 PAIR_BETS = FULL_2T_BETS + FULL_2F_BETS
 PAIR_LABELS = [label for label, _ in PAIR_BETS]
+AXIS_KINDS = ("2車単", "2車複")
+AXIS_KEYS = [(kind, mark) for kind in AXIS_KINDS for mark in VELOVI_MARKS]
+
+def axis_blank():
+    return {key: {"N": 0, "H": 0} for key in AXIS_KEYS}
+
+def axis_rows(records):
+    return pd.DataFrame([{"券種": kind, "軸": mark, "相手": "".join(m for m in VELOVI_MARKS if m != mark), "対象R": records[(kind,mark)]["N"], "的中R": records[(kind,mark)]["H"], "的中率%": pct(records[(kind,mark)]["H"],records[(kind,mark)]["N"])} for kind,mark in AXIS_KEYS])
+
 OLD_2T_LABELS = {label for label, _ in CURRENT_2T_BETS}
 
 ALL_BETS = CURRENT_2T_BETS + CURRENT_3T_BETS
@@ -346,6 +355,16 @@ with tab_carry:
             h = c2.number_input("的中H", min_value=0, value=0, step=1, key=f"pair_carry_h_{label}", label_visibility="collapsed")
             pair_carry_inputs.append((label, int(n), int(h)))
 
+        st.markdown("---")
+        st.markdown("### 印軸別・4点一括的中率（引継ぎ）")
+        st.caption("過去分は各軸の対象Rと的中Rを入力してください。組み合わせ別の対象Rが異なる場合も正確に引き継げます。×未入力のレースでは残りの入力印だけを相手に判定します。")
+        axis_carry_inputs = []
+        for kind, mark in AXIS_KEYS:
+            c0, c1, c2 = st.columns([2.4, 1.0, 1.3])
+            c0.markdown(f"**{kind} {mark}－{''.join(m for m in VELOVI_MARKS if m != mark)}**")
+            n = c1.number_input("対象R", min_value=0, step=1, key=f"axis_n_{kind}_{mark}", label_visibility="collapsed")
+            h = c2.number_input("的中R", min_value=0, step=1, key=f"axis_h_{kind}_{mark}", label_visibility="collapsed")
+            axis_carry_inputs.append(((kind,mark), int(n), int(h)))
         st.form_submit_button("前日までの集計を反映")
 
     for label, n, payout_sum, h in carry_inputs:
@@ -357,6 +376,11 @@ with tab_carry:
         if h > n:
             st.warning(f"{label}: 的中H({h}) が対象N({n})を超えています。")
 
+    carry_axis_records = axis_blank()
+    for key, n, h in axis_carry_inputs:
+        carry_axis_records[key] = {"N": n, "H": h}
+        if h > n:
+            st.warning(f"{key[0]} {key[1]}：的中Rが対象Rを超えています。")
     carry_pair_records = {label: new_rec() for label in PAIR_LABELS}
     for label in OLD_2T_LABELS:
         carry_pair_records[label] = dict(carry_records[label])
@@ -379,6 +403,7 @@ with tab_carry:
 # ============================================================
 daily_records = {label: new_rec() for label in ALL_LABELS}
 daily_mark_records = {mark: new_mark_rec() for mark in VELOVI_MARKS}
+daily_axis_records = axis_blank()
 daily_pair_records = {label: new_rec() for label in PAIR_LABELS}
 valid_races = 0
 excluded_races = 0
@@ -437,6 +462,16 @@ for row in daily_rows:
         if mark in daily_mark_records:
             daily_mark_records[mark][f"C{pos}"] += 1
 
+    # 軸印と、入力されている他の印のいずれかが上位2着に入れば一括1的中。
+    # 2車単は軸が1着、2車複は軸が1着または2着（相手は他の印）。
+    for mark in marks:
+        partners = {car for m, car in marks.items() if m != mark}
+        for kind in AXIS_KINDS:
+            rec_axis = daily_axis_records[(kind, mark)]
+            rec_axis["N"] += 1
+            if (finish[0] == marks[mark] and finish[1] in partners) if kind == "2車単" else (marks[mark] in finish[:2] and any(car in partners for car in finish[:2])):
+                rec_axis["H"] += 1
+
     for label, order in PAIR_BETS:
         if any(mark not in marks for mark in order):
             continue
@@ -482,6 +517,11 @@ for row in daily_rows:
 # ============================================================
 # D. 累積 = 引継ぎ + 日次
 # ============================================================
+total_axis_records = axis_blank()
+for key in AXIS_KEYS:
+    for field in ("N", "H"):
+        total_axis_records[key][field] = carry_axis_records[key][field] + daily_axis_records[key][field]
+
 total_records = {label: new_rec() for label in ALL_LABELS}
 for label in ALL_LABELS:
     add_rec(total_records[label], carry_records[label])
@@ -504,6 +544,9 @@ with tab_result:
     st.subheader("印別・組み合わせ別｜累積 的中率")
     st.caption(f"本日有効入力 {valid_races}R／集計除外 {excluded_races}R。引継ぎ＋日次を合算。×未入力のレースは×を含む組み合わせの対象Rから除外します。")
 
+    st.subheader("印軸別｜2車単・2車複の一括的中率【累積】")
+    st.caption("◎－○▲△×など、軸印と残り4印をひとまとめに判定。2車単は軸1着固定、2車複は着順不問。1Rにつき最大1的中。×未入力時は入力済み印のみで判定。")
+    show_full_table(axis_rows(total_axis_records).style.format({"的中率%": "{:.1f}"}, na_rep="—"))
     st.subheader("印別 入賞率｜累積")
     mark_df = pd.DataFrame([mark_rec_to_row(mark, total_mark_records[mark]) for mark in VELOVI_MARKS])
     show_full_table(mark_df.style.format(
@@ -523,6 +566,8 @@ with tab_result:
     show_full_table(total_df.style.format({"的中率%": "{:.1f}"}, na_rep="—"))
 
     with st.expander("本日分だけの成績を見る"):
+        st.markdown("#### 印軸別｜2車単・2車複の一括的中率（本日分）")
+        show_full_table(axis_rows(daily_axis_records).style.format({"的中率%": "{:.1f}"}, na_rep="—"))
         st.markdown("#### 印別 入賞率（本日分）")
         daily_mark_df = pd.DataFrame([mark_rec_to_row(mark, daily_mark_records[mark]) for mark in VELOVI_MARKS])
         show_full_table(
@@ -546,6 +591,8 @@ with tab_result:
         with st.expander("本日のレース別判定を確認"):
             st.dataframe(pd.DataFrame(race_details), use_container_width=True, hide_index=True)
 
+    axis_export = axis_rows(total_axis_records)
+    st.download_button("印軸別・一括的中率CSVをダウンロード", data=axis_export.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_axis_hit_rates.csv", mime="text/csv")
     pair_export = pd.DataFrame([
         {"券種": label.split(" ")[0], **pair_row(label, total_pair_records[label])}
         for label in PAIR_LABELS
