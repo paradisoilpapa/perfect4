@@ -38,6 +38,12 @@ CURRENT_3T_BETS: List[Tuple[str, Tuple[str, ...]]] = [
 ALL_BETS = CURRENT_2T_BETS + CURRENT_3T_BETS
 ALL_LABELS = [label for label, _ in ALL_BETS]
 
+# ○△－◎○▲ の2車単5点（同一車番の重複は除外）
+ALT_2T_LABELS = [
+    "2車単 ○-◎", "2車単 ○-▲",
+    "2車単 △-◎", "2車単 △-○", "2車単 △-▲",
+]
+
 def clean_digits(value: str) -> str:
     """区切り記号を除き、数字だけを残す。"""
     if value is None:
@@ -447,6 +453,28 @@ with tab_result:
     st.subheader("買い目別｜累積 的中率・回収率")
     total_df = pd.DataFrame([rec_to_row(label, total_records[label]) for label in ALL_LABELS])
     show_full_table(style_roi(total_df))
+
+    st.subheader("○△－◎○▲｜2車単5点 合算回収率")
+    # 旧セット集計は復活させず、この指定5点のみ合算する。
+    alt_recs = [total_records[label] for label in ALT_2T_LABELS]
+    alt_invest = sum(int(rec["KSUM"]) * 100 for rec in alt_recs)
+    alt_payout = sum(int(rec["SUM"]) for rec in alt_recs)
+    alt_hits = sum(int(rec["H"]) for rec in alt_recs)
+    alt_n_values = [int(rec["N"]) for rec in alt_recs]
+    alt_roi = 100 * alt_payout / alt_invest if alt_invest else None
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("投資額", f"{alt_invest:,}円")
+    m2.metric("払戻合計", f"{alt_payout:,}円")
+    m3.metric("収支", f"{alt_payout - alt_invest:+,}円")
+    m4.metric("回収率", f"{alt_roi:.1f}%" if alt_roi is not None else "—")
+    st.caption(f"対象：{' / '.join(ALT_2T_LABELS)}。的中数合計 {alt_hits}件。各買い目100円で計算。")
+    if len(set(alt_n_values)) > 1:
+        st.warning(
+            "注意：5点の対象Rが一致していません（"
+            + "、".join(f"{label}: {total_records[label]['N']}R" for label in ALT_2T_LABELS)
+            + "）。上記は入力済みデータの投資額・払戻額を合算した暫定回収率です。"
+            "同じレースで5点購入した場合の回収率とは異なります。"
+        )
 
     with st.expander("本日分だけの成績を見る"):
         st.markdown("#### 印別 入賞率（本日分）")
