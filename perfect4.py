@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""ヴェロビ集計｜◎○軸3連複・3連単検証追加版。
+"""ヴェロビ集計｜◎軸ワイドβ・ε検証版。
 
 元の618行版を基準とした仕様:
 - 通常 ◎○▲△× / 妙味 αβγεΩ の印着内率
 - 2車単は各軸の表裏8通りだけ（通常◎、妙味α）
 - 通常◎→○▲△ / 妙味α→γβε の3点セット集計
-- 3連複 ◎-○-β/ε、3連単 ◎→○→β/ε、ワイド ◎-β/ε を集計（各2点）
+- ワイド ◎-β/ε を集計（最大2点）
 - 旧通常評価の入力キー・引継ぎキーを維持
 - 日次100レース、除外、CSV、日次・累積・レース別確認
 """
@@ -15,7 +15,7 @@ import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ集計｜◎・α比較", layout="wide")
 st.title("ヴェロビ集計｜通常◎・妙味α 比較")
-st.caption("通常評価と妙味軸評価を独立集計。◎→×・無印2車も比較。3連複・3連単の◎○β／◎○εとワイド◎－β／εを検証。各買い目100円平買い換算。")
+st.caption("通常評価と妙味軸評価を独立集計。◎→×・無印2車も比較。ワイド◎－β／εを検証。各買い目100円平買い換算。")
 
 GROUP_MARKS = {
     "通常": ("◎", "○", "▲", "△", "×"),
@@ -23,8 +23,6 @@ GROUP_MARKS = {
 }
 SET_TARGETS = {"通常": ("○", "▲", "△"), "妙味": ("γ", "β", "ε")}
 GROUP_AXES = {g: marks[0] for g, marks in GROUP_MARKS.items()}
-TRIPLE_TARGETS = ("β", "ε")
-TRIPLE_KINDS = ("3連複", "3連単")
 WIDE_TARGETS = ("β", "ε")
 
 
@@ -183,29 +181,25 @@ with tab_daily:
     st.caption(
         "通常印順：◎○▲△（×任意）、妙味印順：αβγε（Ω任意）。"
         "印は各グループ4～5車を入力。片方だけの入力も可。"
-        "着順は3着まで。払戻は2車単・3連複・3連単・ワイドそれぞれ100円あたりの金額です。"
+        "着順は3着まで。払戻は2車単・ワイドそれぞれ100円あたりの金額です。"
         "落車・失格等は集計除外にチェックしてください。"
         "車数は7車が初期値です。6車立ては6に変更してください。"
     )
     with st.form("daily_input_form"):
-        cols = st.columns([0.5, 1.2, 1.2, 0.75, 0.7, 0.7, 0.7, 0.7, 0.6, 0.6])
+        cols = st.columns([0.5, 1.4, 1.4, 0.85, 0.8, 0.8, 0.6, 0.7])
         for col, title in zip(cols, [
-            "R", "通常印順 ◎○▲△×", "妙味印順 αβγεΩ", "着順", "2車単", "3連複", "3連単", "ワイド", "車数", "集計除外"
+            "R", "通常印順 ◎○▲△×", "妙味印順 αβγεΩ", "着順", "2車単", "ワイド", "車数", "集計除外"
         ]):
             col.markdown(f"**{title}**")
         daily_rows = []
         for i in range(1, 101):
-            c1, c2, c3, c4, c5, c8, c9, c10, c6, c7 = st.columns([0.5, 1.2, 1.2, 0.75, 0.7, 0.7, 0.7, 0.7, 0.6, 0.6])
+            c1, c2, c3, c4, c5, c10, c6, c7 = st.columns([0.5, 1.4, 1.4, 0.85, 0.8, 0.8, 0.6, 0.7])
             rid = c1.text_input("R", value=str(i), key=f"rid_{i}", label_visibility="collapsed")
             normal = c2.text_input("通常印順", value="", key=f"mark_{i}", label_visibility="collapsed")
             alpha = c3.text_input("妙味印順", value="", key=f"alpha_mark_{i}", label_visibility="collapsed")
             finish = c4.text_input("着順", value="", key=f"fin_{i}", label_visibility="collapsed")
             pay = c5.number_input("2車単", min_value=0, value=0, step=10,
                                   key=f"pay2t_{i}", label_visibility="collapsed")
-            pay3f = c8.number_input("3連複", min_value=0, value=0, step=10,
-                                    key=f"pay3f_{i}", label_visibility="collapsed")
-            pay3t = c9.number_input("3連単", min_value=0, value=0, step=10,
-                                    key=f"pay3t_{i}", label_visibility="collapsed")
             paywide = c10.number_input("ワイド", min_value=0, value=0, step=10,
                                          key=f"paywide_{i}", label_visibility="collapsed")
             field_size = c6.selectbox("車数", options=[7, 6], key=f"field_size_{i}", label_visibility="collapsed")
@@ -213,7 +207,7 @@ with tab_daily:
                                   label_visibility="collapsed")
             daily_rows.append({
                 "race": rid, "normal": normal, "alpha": alpha,
-                "finish": finish, "pay": int(pay), "pay3f": int(pay3f), "pay3t": int(pay3t), "paywide": int(paywide), "field_size": int(field_size), "exclude": bool(exclude)
+                "finish": finish, "pay": int(pay), "paywide": int(paywide), "field_size": int(field_size), "exclude": bool(exclude)
             })
         st.form_submit_button("日次入力を反映")
 
@@ -224,14 +218,13 @@ with tab_daily:
 carry_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 carry_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
 carry_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
-carry_triples = {(kind, mark): blank_bet() for kind in TRIPLE_KINDS for mark in TRIPLE_TARGETS}
 carry_wides = {mark: blank_bet() for mark in WIDE_TARGETS}
 
 with tab_carry:
     st.subheader("前日までの集計（累積・引継ぎ）")
     st.caption(
         "通常評価は旧版の印別1～3着回数と、◎を含む2車単表裏8通りを転記。"
-        "妙味評価はα軸の成績を新規入力。旧版の3連単・他の2車単は転記不要です。"
+        "妙味評価はα軸の成績を新規入力。旧版の他の2車単は転記不要です。"
         "引継ぎ対象Nは各印・買い目ごとに入力できます。"
     )
     with st.form("carryover_form"):
@@ -287,20 +280,6 @@ with tab_carry:
             carry_unmarked[label] = {"N": int(n), "H": int(h), "SUM": int(summ), "KSUM": int(n)}
             if h > n:
                 st.warning(f"{label}: 的中Hが対象Nを超えています。")
-        st.markdown("### ◎－○－β／ε｜3連複・3連単（引継ぎ）")
-        st.caption("以前の3連系集計があれば入力。ない場合は0のまま、新規分から集計します。")
-        for kind in TRIPLE_KINDS:
-            for mark in TRIPLE_TARGETS:
-                label = f"{kind} ◎{'－' if kind == '3連複' else '→'}○{'－' if kind == '3連複' else '→'}{mark}"
-                a, b, c, d = st.columns([2.4, 1.0, 1.3, 1.3])
-                a.markdown(f"**{label}**")
-                prefix = f"triple_carry_{'f' if kind == '3連複' else 't'}_{mark}"
-                n = b.number_input("対象N", min_value=0, step=1, key=f"{prefix}_n", label_visibility="collapsed")
-                h = c.number_input("的中H", min_value=0, step=1, key=f"{prefix}_h", label_visibility="collapsed")
-                summ = d.number_input("払戻合計", min_value=0, step=10, key=f"{prefix}_sum", label_visibility="collapsed")
-                carry_triples[(kind, mark)] = {"N": int(n), "H": int(h), "SUM": int(summ), "KSUM": int(n)}
-                if h > n:
-                    st.warning(f"{label}: 的中Hが対象Nを超えています。")
         st.markdown("### ワイド ◎－β／ε（引継ぎ）")
         st.caption("以前のワイド集計がある場合だけ入力してください。なければ0のまま、新規分から集計します。")
         for mark in WIDE_TARGETS:
@@ -322,7 +301,6 @@ with tab_carry:
 daily_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 daily_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
 daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
-daily_triples = {(kind, mark): blank_bet() for kind in TRIPLE_KINDS for mark in TRIPLE_TARGETS}
 daily_wides = {mark: blank_bet() for mark in WIDE_TARGETS}
 valid_races = {g: 0 for g in GROUP_MARKS}
 excluded_races = 0
@@ -335,20 +313,18 @@ for entry in daily_rows:
     raw_alpha = str(entry["alpha"]).strip()
     raw_finish = str(entry["finish"]).strip()
     payout = int(entry["pay"])
-    payout3f = int(entry["pay3f"])
-    payout3t = int(entry["pay3t"])
     payoutwide = int(entry["paywide"])
     field_size = int(entry["field_size"])
     exclude = bool(entry["exclude"])
 
-    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, payout3f > 0, payout3t > 0, payoutwide > 0, exclude]):
+    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, payoutwide > 0, exclude]):
         continue
 
     if exclude:
         excluded_races += 1
         race_details.append({
             "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
-            "着順": raw_finish, "2車単払戻": payout, "3連複払戻": payout3f, "3連単払戻": payout3t, "ワイド払戻": payoutwide,
+            "着順": raw_finish, "2車単払戻": payout, "ワイド払戻": payoutwide,
             "集計除外": "除外", "通常的中": "集計除外", "妙味的中": "集計除外"
         })
         continue
@@ -360,7 +336,7 @@ for entry in daily_rows:
 
     detail = {
         "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
-        "着順": "-".join(finish[:3]), "2車単払戻": payout, "3連複払戻": payout3f, "3連単払戻": payout3t, "ワイド払戻": payoutwide,
+        "着順": "-".join(finish[:3]), "2車単払戻": payout, "ワイド払戻": payoutwide,
         "集計除外": "", "◎→×無無": "未集計"
     }
     for group, raw in (("通常", raw_normal), ("妙味", raw_alpha)):
@@ -425,28 +401,8 @@ for entry in daily_rows:
             else:
                 warnings.append(f"R{rid}: 車数と車番が一致しないため◎→×無無を集計しません。")
                 detail["◎→×無無"] = "車数不一致・対象外"
-    # 3連複・3連単は通常◎○と妙味β/εを横断して評価する。
-    # 車番重複・印不足・車数不整合の買い目は購入点数に含めない。
     nm = parse_markline(raw_normal, "通常") if raw_normal else {}
     am = parse_markline(raw_alpha, "妙味") if raw_alpha else {}
-    for kind in TRIPLE_KINDS:
-        for target in TRIPLE_TARGETS:
-            label = f"{kind} ◎{'－' if kind == '3連複' else '→'}○{'－' if kind == '3連複' else '→'}{target}"
-            cars = [nm.get("◎"), nm.get("○"), am.get(target)]
-            if any(c is None for c in cars) or len(set(cars)) != 3 or any(not (1 <= int(c) <= field_size) for c in cars):
-                detail[label] = "不成立"
-                continue
-            rec = daily_triples[(kind, target)]
-            rec["N"] += 1
-            rec["KSUM"] += 1
-            hit = (set(cars) == set(finish[:3])) if kind == "3連複" else (cars == finish[:3])
-            if hit:
-                rec["H"] += 1
-                pay_this = payout3f if kind == "3連複" else payout3t
-                rec["SUM"] += pay_this
-                if pay_this <= 0:
-                    warnings.append(f"R{rid}: {label} 的中ですが払戻が0です。")
-            detail[label] = "的中" if hit else "外れ"
     # ワイドは着順上位3車に◎とβ/εが両方入れば的中（順不同）。
     # 同一車番や印不足は不成立として購入点数に含めない。
     for target in WIDE_TARGETS:
@@ -484,7 +440,6 @@ for group, marks in GROUP_MARKS.items():
     }
 
 
-total_triples = {key: add_records(carry_triples[key], daily_triples[key], ("N", "H", "SUM", "KSUM")) for key in daily_triples}
 total_wides = {key: add_records(carry_wides[key], daily_wides[key], ("N", "H", "SUM", "KSUM")) for key in daily_wides}
 
 total_unmarked = {
@@ -510,29 +465,6 @@ def unmarked_frame(records):
     return pd.DataFrame([bet_row(k, records[k]) for k in ("◎→×", "◎→無印1", "◎→無印2")])
 
 
-def triple_label(kind, mark):
-    sep = "－" if kind == "3連複" else "→"
-    return f"◎{sep}○{sep}{mark}"
-
-
-def triple_frame(kind, records):
-    return pd.DataFrame([bet_row(triple_label(kind, m), records[(kind, m)]) for m in TRIPLE_TARGETS])
-
-
-def triple_summary(kind, records):
-    selected = [records[(kind, m)] for m in TRIPLE_TARGETS]
-    n = max((int(r["N"]) for r in selected), default=0)
-    ksum = sum(int(r["KSUM"]) for r in selected)
-    h = sum(int(r["H"]) for r in selected)
-    summ = sum(int(r["SUM"]) for r in selected)
-    return {"券種": kind, "買い方": "◎－○－β／ε" if kind == "3連複" else "◎→○→β／ε",
-            "対象R（最大）": n, "購入点数": ksum, "投資額": ksum * 100,
-            "的中数": h, "的中率%（対象R比）": pct(h, n), "払戻合計": summ,
-            "平均的中配当": round(summ / h, 1) if h else None,
-            "回収率%": pct(summ, ksum * 100)}
-
-
-def wide_frame(records):
     return pd.DataFrame([bet_row(f"◎－{m}", records[m]) for m in WIDE_TARGETS])
 
 
@@ -603,13 +535,6 @@ with tab_result:
     show_full_table(style_roi(unmarked_frame(total_unmarked)))
 
     st.divider()
-    st.subheader("◎・○軸｜3連複＆3連単 β／ε【累積】")
-    st.caption("◎○β／◎○εの重複車番は買い目不成立として除外。対象R（最大）は各買い目の対象Rの最大値です。投資額は成立した点数のみ計算します。")
-    show_full_table(style_roi(pd.DataFrame([triple_summary(kind, total_triples) for kind in TRIPLE_KINDS])))
-    for kind in TRIPLE_KINDS:
-        st.markdown(f"#### {kind}｜買い目別【累積】")
-        show_full_table(style_roi(triple_frame(kind, total_triples)))
-
     st.divider()
     st.subheader("◎軸｜ワイド β／ε【累積】")
     st.caption("◎－βと◎－εを各100円で検証。◎と相手が同一車番の場合は不成立として除外。ワイド払戻は的中組の100円あたりの払戻を入力してください。")
@@ -637,10 +562,6 @@ with tab_result:
         show_full_table(style_roi(today_df))
         st.markdown("#### ◎→×・無印・無印｜本日分")
         show_full_table(style_roi(unmarked_frame(today_unmarked)))
-        st.markdown("#### 3連複・3連単｜本日分")
-        show_full_table(style_roi(pd.DataFrame([triple_summary(kind, daily_triples) for kind in TRIPLE_KINDS])))
-        for kind in TRIPLE_KINDS:
-            show_full_table(style_roi(triple_frame(kind, daily_triples)))
         st.markdown("#### ワイド ◎－β／ε｜本日分")
         show_full_table(style_roi(pd.DataFrame([wide_summary(daily_wides)])))
         show_full_table(style_roi(wide_frame(daily_wides)))
@@ -672,9 +593,6 @@ with tab_result:
     )
     st.download_button("ワイド ◎－β／ε CSV", data=wide_frame(total_wides).to_csv(index=False).encode("utf-8-sig"),
                        file_name="velovi_wide_beta_epsilon.csv", mime="text/csv")
-    for kind in TRIPLE_KINDS:
-        st.download_button(f"{kind} ◎○β／ε CSV", data=triple_frame(kind, total_triples).to_csv(index=False).encode("utf-8-sig"),
-                           file_name=f"velovi_triple_{'f' if kind == '3連複' else 't'}.csv", mime="text/csv")
     for group in GROUP_MARKS:
         export = bet_frame(group, total_bet_records)
         st.download_button(
