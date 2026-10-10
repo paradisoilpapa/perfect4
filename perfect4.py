@@ -10,6 +10,7 @@
 - 日次100レース、除外、CSV、日次・累積・レース別確認
 """
 from typing import Dict, List, Tuple
+import re
 import pandas as pd
 import streamlit as st
 
@@ -36,6 +37,34 @@ def all_axis_pairs(marks: Tuple[str, ...]) -> List[Tuple[str, str]]:
 
 
 BET_PAIRS = {g: all_axis_pairs(marks) for g, marks in GROUP_MARKS.items()}
+
+
+def parse_wide_payouts(entries, finish, rid, warnings):
+    """的中ワイド3組の車番・100円払戻を個別入力。未入力は未記録。"""
+    result = {}
+    allowed = {frozenset(pair) for pair in ((finish[0], finish[1]), (finish[0], finish[2]), (finish[1], finish[2]))}
+    for idx, raw in enumerate(entries, 1):
+        raw = str(raw or "").strip()
+        if not raw:
+            continue
+        m = re.fullmatch(r"\s*([1-9])\s*[-－ー=：:,/]\s*([1-9])\s*[:：=,/]\s*([0-9,]+)\s*", raw)
+        if not m:
+            warnings.append(f"R{rid}: ワイド{idx}は『1-2:350』の形式で入力してください。")
+            continue
+        a, b, money = m.groups()
+        pair = frozenset((a, b))
+        amount = int(money.replace(",", ""))
+        if len(pair) != 2 or pair not in allowed:
+            warnings.append(f"R{rid}: ワイド{idx}の{a}-{b}は着順上位3車の組み合わせではありません。")
+            continue
+        if pair in result:
+            warnings.append(f"R{rid}: ワイド{idx}の{a}-{b}は重複入力です。")
+            continue
+        if amount <= 0:
+            warnings.append(f"R{rid}: ワイド{idx}の払戻が0円です。")
+            continue
+        result[pair] = amount
+    return result
 
 
 def blank_bet():
@@ -181,11 +210,11 @@ with tab_daily:
     st.caption(
         "通常印順：◎○▲△（×任意）、妙味印順：αβγε（Ω任意）。"
         "印は各グループ4～5車を入力。片方だけの入力も可。"
-        "着順は3着まで。払戻は2車単・ワイドそれぞれ100円あたりの金額です。"
+        "着順は3着まで。2車単払戻は100円あたりの金額です。"
         "落車・失格等は集計除外にチェックしてください。"
         "車数は7車が初期値です。6車立ては6に変更してください。"
     )
-    st.caption("入力欄を2段に分割しました。画面幅が狭くても数字が隠れず、横スクロール不要です。")
+    st.caption("ワイドは的中した最大3組を別々に入力します。例：1-2:350、1-3:480、2-3:720。的中しない組は空欄で構いません。")
     with st.form("daily_input_form"):
         daily_rows = []
         for i in range(1, 101):
@@ -194,17 +223,21 @@ with tab_daily:
             rid = c1.text_input("R番号", value=str(i), key=f"rid_{i}")
             normal = c2.text_input("通常印順 ◎○▲△×", value="", key=f"mark_{i}")
             alpha = c3.text_input("妙味印順 αβγεΩ", value="", key=f"alpha_mark_{i}")
-            c4, c5, c10, c6, c7 = st.columns([1.15, 1.15, 1.15, 0.9, 0.75])
+            c4, c5, c6, c7 = st.columns([1.6, 1.5, 1.0, 0.9])
             finish = c4.text_input("着順（3着まで）", value="", key=f"fin_{i}")
             pay = c5.number_input("2車単払戻", min_value=0, value=0, step=10,
                                   key=f"pay2t_{i}")
-            paywide = c10.number_input("ワイド払戻", min_value=0, value=0, step=10,
-                                       key=f"paywide_{i}")
+            w1, w2, w3 = st.columns(3)
+            wide_entries = (
+                w1.text_input("ワイド的中① 車番:払戻", key=f"wide_pair1_{i}", placeholder="例 1-2:350"),
+                w2.text_input("ワイド的中② 車番:払戻", key=f"wide_pair2_{i}", placeholder="例 1-3:480"),
+                w3.text_input("ワイド的中③ 車番:払戻", key=f"wide_pair3_{i}", placeholder="例 2-3:720"),
+            )
             field_size = c6.selectbox("車数", options=[7, 6], key=f"field_size_{i}")
             exclude = c7.checkbox("集計除外", value=False, key=f"exclude_{i}")
             daily_rows.append({
                 "race": rid, "normal": normal, "alpha": alpha,
-                "finish": finish, "pay": int(pay), "paywide": int(paywide),
+                "finish": finish, "pay": int(pay), "wide_entries": wide_entries,
                 "field_size": int(field_size), "exclude": bool(exclude)
             })
             st.divider()
@@ -312,18 +345,18 @@ for entry in daily_rows:
     raw_alpha = str(entry["alpha"]).strip()
     raw_finish = str(entry["finish"]).strip()
     payout = int(entry["pay"])
-    payoutwide = int(entry["paywide"])
+    wide_entries = entry["wide_entries"]
     field_size = int(entry["field_size"])
     exclude = bool(entry["exclude"])
 
-    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, payoutwide > 0, exclude]):
+    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, any(str(v).strip() for v in wide_entries), exclude]):
         continue
 
     if exclude:
         excluded_races += 1
         race_details.append({
             "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
-            "着順": raw_finish, "2車単払戻": payout, "ワイド払戻": payoutwide,
+            "着順": raw_finish, "2車単払戻": payout, "ワイド的中組": " / ".join(x for x in wide_entries if x),
             "集計除外": "除外", "通常的中": "集計除外", "妙味的中": "集計除外"
         })
         continue
@@ -335,7 +368,7 @@ for entry in daily_rows:
 
     detail = {
         "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
-        "着順": "-".join(finish[:3]), "2車単払戻": payout, "ワイド払戻": payoutwide,
+        "着順": "-".join(finish[:3]), "2車単払戻": payout, "ワイド的中組": " / ".join(x for x in wide_entries if x),
         "集計除外": "", "◎→×無無": "未集計"
     }
     for group, raw in (("通常", raw_normal), ("妙味", raw_alpha)):
@@ -400,6 +433,7 @@ for entry in daily_rows:
             else:
                 warnings.append(f"R{rid}: 車数と車番が一致しないため◎→×無無を集計しません。")
                 detail["◎→×無無"] = "車数不一致・対象外"
+    wide_payout_map = parse_wide_payouts(wide_entries, finish, rid, warnings)
     nm = parse_markline(raw_normal, "通常") if raw_normal else {}
     am = parse_markline(raw_alpha, "妙味") if raw_alpha else {}
     # ワイドは着順上位3車に◎とβ/εが両方入れば的中（順不同）。
@@ -416,9 +450,11 @@ for entry in daily_rows:
         hit = all(c in finish[:3] for c in cars)
         if hit:
             rec["H"] += 1
-            rec["SUM"] += payoutwide
-            if payoutwide <= 0:
-                warnings.append(f"R{rid}: {label} 的中ですがワイド払戻が0です。")
+            pair = frozenset(cars)
+            if pair in wide_payout_map:
+                rec["SUM"] += wide_payout_map[pair]
+            else:
+                warnings.append(f"R{rid}: {label} 的中ですが、{cars[0]}-{cars[1]}のワイド払戻が未入力です。")
         detail[label] = "的中" if hit else "外れ"
     race_details.append(detail)
 
@@ -536,7 +572,7 @@ with tab_result:
     st.divider()
     st.divider()
     st.subheader("◎軸｜ワイド β／ε【累積】")
-    st.caption("◎－βと◎－εを各100円で検証。◎と相手が同一車番の場合は不成立として除外。ワイド払戻は的中組の100円あたりの払戻を入力してください。")
+    st.caption("◎－βと◎－εを各100円で検証。◎と相手が同一車番の場合は不成立として除外。ワイド払戻は的中した車番の組ごとに個別入力します。")
     show_full_table(style_roi(pd.DataFrame([wide_summary(total_wides)])))
     show_full_table(style_roi(wide_frame(total_wides)))
 
