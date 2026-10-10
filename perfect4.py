@@ -171,7 +171,7 @@ def style_roi(df):
         return ""
     if "回収率%" not in df.columns:
         return df
-    formats = {col: "{:.1f}" for col in ("的中率%", "回収率%", "平均的中配当") if col in df.columns}
+    formats = {col: "{:.1f}" for col in df.columns if "率%" in str(col) or col == "平均的中配当"}
     return df.style.format(formats, na_rep="—").map(color_roi, subset=["回収率%"])
 
 
@@ -702,7 +702,7 @@ with tab_result:
         "回収率%": pct(trio_total_payout, trio_cost),
         "払戻未入力の的中R": trio_missing_payouts,
     }])
-    show_full_table(trio_summary)
+    show_full_table(style_roi(trio_summary))
     if trio_missing_payouts:
         st.warning(f"3連複の的中{trio_missing_payouts}Rで払戻が未入力です。回収率は暫定値です。")
     st.markdown("**的中した記号の組み合わせ別集計**")
@@ -722,10 +722,10 @@ with tab_result:
     show_full_table(style_roi(symbol_table))
     with st.expander("3連複・記号組み合わせのレース別内訳"):
         if trio_symbol_details:
-            show_full_table(pd.DataFrame(trio_symbol_details))
+            show_full_table(style_roi(pd.DataFrame(trio_symbol_details)))
     with st.expander("3連複のレース別判定を見る"):
         if trio_detail:
-            show_full_table(pd.DataFrame(trio_detail))
+            show_full_table(style_roi(pd.DataFrame(trio_detail)))
 
     st.subheader("◎軸｜ワイド β／ε【累積】")
     st.caption("◎－βと◎－εを各100円で検証。◎と相手が同一車番の場合は不成立として除外。ワイド払戻は的中した車番の組ごとに個別入力します。")
