@@ -232,6 +232,7 @@ with tab_daily:
             pay = c5.number_input("2車単払戻", min_value=0, value=0, step=10,
                                   key=f"pay2t_{i}")
             trio_pay = c5.number_input("3連複払戻（100円）", min_value=0, value=0, step=10, key=f"pay3f_{i}")
+            quinella_pay = c5.number_input("2車複払戻（100円）", min_value=0, value=0, step=10, key=f"pay2f_{i}")
             st.caption("ワイド的中組（車番・払戻を別入力）")
             wide_entries = []
             for j in range(1, 4):
@@ -243,7 +244,7 @@ with tab_daily:
             exclude = c7.checkbox("集計除外", value=False, key=f"exclude_{i}")
             daily_rows.append({
                 "race": rid, "normal": normal, "alpha": alpha,
-                "finish": finish, "pay": int(pay), "trio_pay": int(trio_pay), "wide_entries": wide_entries,
+                "finish": finish, "pay": int(pay), "trio_pay": int(trio_pay), "quinella_pay": int(quinella_pay), "wide_entries": wide_entries,
                 "field_size": int(field_size), "exclude": bool(exclude)
             })
             st.divider()
@@ -342,6 +343,9 @@ daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1
 daily_wides = {mark: blank_bet() for mark in WIDE_TARGETS}
 # ◎－×：通常評価の×を相手とするワイド。既存の払戻入力を再利用。
 daily_wide_x = blank_bet()
+# 2車複：◎－無印（全無印車）、◎－×。日次入力のみ。
+daily_quinella = {name: blank_bet() for name in ("◎－無印合計", "◎－×")}
+quinella_missing_payouts = 0
 wide_unmarked_names = ("◎－無印1", "◎－無印2", "◎－無印合計", "◎－無印∩β/ε")
 daily_wide_unmarked = {name: blank_bet() for name in wide_unmarked_names}
 # 3連複：◎軸、相手は通常無印1・2と妙味β・ε（重複車番は1車扱い）。
@@ -367,11 +371,12 @@ for entry in daily_rows:
     raw_finish = str(entry["finish"]).strip()
     payout = int(entry["pay"])
     trio_pay = int(entry.get("trio_pay", 0))
+    quinella_pay = int(entry.get("quinella_pay", 0))
     wide_entries = entry["wide_entries"]
     field_size = int(entry["field_size"])
     exclude = bool(entry["exclude"])
 
-    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, trio_pay > 0, any(str(pair).strip() or money > 0 for pair, money in wide_entries), exclude]):
+    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, trio_pay > 0, quinella_pay > 0, any(str(pair).strip() or money > 0 for pair, money in wide_entries), exclude]):
         continue
 
     if exclude:
@@ -533,6 +538,28 @@ for entry in daily_rows:
             detail["3連複 ◎－無無βε－全"] = "車数不一致・対象外"
     else:
         detail["3連複 ◎－無無βε－全"] = "印不足・対象外"
+    # 2車複：◎と相手が1・2着なら的中（着順不問）。車番は既存の通常印から算出。
+    q_marks = parse_markline(raw_normal, "通常") if raw_normal else {}
+    if len(q_marks) == 5 and all(1 <= int(v) <= field_size for v in q_marks.values()):
+        q_axis = q_marks["◎"]
+        q_unmarked = sorted(set(str(v) for v in range(1, field_size + 1)) - set(q_marks.values()), key=int)
+        q_pairs = [("◎－×", q_marks["×"])] + [("◎－無印合計", car) for car in q_unmarked]
+        for q_label, q_other in q_pairs:
+            q_rec = daily_quinella[q_label]
+            q_rec["N"] += 1
+            q_rec["KSUM"] += 1
+            if {q_axis, q_other} == set(finish[:2]):
+                q_rec["H"] += 1
+                if quinella_pay > 0:
+                    q_rec["SUM"] += quinella_pay
+                else:
+                    quinella_missing_payouts += 1
+                    warnings.append(f"R{rid}: 2車複{q_label}が的中していますが、2車複払戻が未入力です。")
+        detail["2車複 ◎－無印"] = "的中" if any({q_axis, car} == set(finish[:2]) for car in q_unmarked) else "外れ"
+        detail["2車複 ◎－×"] = "的中" if {q_axis, q_marks["×"]} == set(finish[:2]) else "外れ"
+    else:
+        detail["2車複 ◎－無印"] = "印不足・対象外"
+        detail["2車複 ◎－×"] = "印不足・対象外"
     wide_payout_map = parse_wide_payouts(wide_entries, finish, rid, warnings)
     # ◎－× ワイド：有効な通常印が揃ったレースのみ1点購入。
     x_marks = parse_markline(raw_normal, "通常") if raw_normal else {}
@@ -765,6 +792,13 @@ with tab_result:
         if trio_detail:
             show_full_table(style_roi(pd.DataFrame(trio_detail)))
 
+    st.subheader("◎軸｜2車複 ◎－無印／◎－×【本日入力分】")
+    st.caption("◎－無印は通常印5車以外の全車を各100円で購入。◎－×は1点100円。両者が1・2着なら着順不問で的中。2車複払戻は1レース1組の金額を入力します。過去の引継ぎ分は含みません。")
+    q_df = pd.DataFrame([bet_row(name, daily_quinella[name]) for name in ("◎－無印合計", "◎－×")])
+    show_full_table(style_roi(q_df))
+    if quinella_missing_payouts:
+        st.warning(f"2車複の的中{quinella_missing_payouts}件で払戻が未入力です。回収率は暫定値です。")
+
     st.subheader("◎軸｜ワイド β／ε【累積】")
     st.caption("◎－βと◎－εを各100円で検証。◎と相手が同一車番の場合は不成立として除外。ワイド払戻は的中した車番の組ごとに個別入力します。")
     show_full_table(style_roi(pd.DataFrame([wide_summary(total_wides)])))
@@ -832,6 +866,7 @@ with tab_result:
         data=summary_df.to_csv(index=False).encode("utf-8-sig"),
         file_name="velovi_axis_3point_summary.csv", mime="text/csv"
     )
+    st.download_button("2車複 ◎－無印／◎－× CSV", data=pd.DataFrame([bet_row(name, daily_quinella[name]) for name in ("◎－無印合計", "◎－×")]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_quinella_daily.csv", mime="text/csv")
     st.download_button("ワイド ◎－× CSV", data=pd.DataFrame([bet_row("◎－×", daily_wide_x)]).to_csv(index=False).encode("utf-8-sig"),
                        file_name="velovi_wide_x_daily.csv", mime="text/csv")
     st.download_button("ワイド ◎－無印・重複抽出 CSV", data=wide_unmarked_frame(daily_wide_unmarked).to_csv(index=False).encode("utf-8-sig"),
