@@ -346,6 +346,8 @@ daily_wide_unmarked = {name: blank_bet() for name in wide_unmarked_names}
 trio_stats = {"対象R": 0, "購入点数": 0, "的中数": 0, "的中R": 0}
 trio_detail = []
 trio_symbol_counts = {}
+trio_symbol_stakes = {}
+trio_symbol_races = {}
 trio_normal_counts = {}
 trio_symbol_payouts = {}
 trio_missing_payouts = 0
@@ -466,32 +468,43 @@ for entry in daily_rows:
                 (str(v) for v in range(1, field_size + 1) if str(v) != trio_axis), 2
             ) if a in trio_others or b in trio_others]
             trio_hit = frozenset(finish[:3]) in trio_tickets
-            # 3連複の記号分類は「◎・無・β・ε・他」だけを使用。
-            # 通常印○▲△×は一切表示しない。2列目以外の車は「他」。
-            # 無とβ/εが同じ車の場合は複数の解釈が成立するため、
-            # 組合せごとに1回ずつ集計し、合計は重複し得る。
-            if trio_hit and trio_axis in finish[:3]:
-                other_cars = [car for car in finish[:3] if car != trio_axis]
-                def trio_tags(car):
-                    tags = set()
-                    if car in trio_unmarked:
-                        tags.add("無")
-                    if trio_value.get("β") == car:
-                        tags.add("β")
-                    if trio_value.get("ε") == car:
-                        tags.add("ε")
-                    return tags or {"他"}
-                rank = {"無": 0, "β": 1, "ε": 2, "他": 3}
-                labels = {"◎－" + "－".join(sorted((a, b), key=lambda x: rank[x]))
-                          for a in trio_tags(other_cars[0]) for b in trio_tags(other_cars[1])}
-                for label in labels:
+            # 通常評価の印を最優先し、通常印がない車だけ妙味β・εを採用。
+            # 無印と妙味印が重なる場合は「無」を優先。
+            # 3列目「全」は買い目の範囲であり、集計上の記号ではない。
+            normal_by_car = {car: mark for mark, car in trio_normal.items()}
+            def trio_tag(car):
+                if car in normal_by_car:
+                    return normal_by_car[car]
+                if car in trio_unmarked:
+                    return "無"
+                if trio_value.get("β") == car:
+                    return "β"
+                if trio_value.get("ε") == car:
+                    return "ε"
+                raise ValueError(f"R{rid}: 車番{car}の記号が判定できません")
+
+            rank = {"◎": 0, "○": 1, "▲": 2, "△": 3, "×": 4, "無": 5, "β": 6, "ε": 7}
+            hit_ticket = frozenset(finish[:3]) if trio_hit else None
+            hit_label = ""
+            race_labels = set()
+            for ticket in trio_tickets:
+                other_cars = list(ticket - {trio_axis})
+                tags = sorted((trio_tag(car) for car in other_cars), key=lambda x: rank[x])
+                label = "◎－" + "－".join(tags)
+                race_labels.add(label)
+                trio_symbol_stakes[label] = trio_symbol_stakes.get(label, 0) + 1
+                if ticket == hit_ticket:
+                    hit_label = label
                     trio_symbol_counts[label] = trio_symbol_counts.get(label, 0) + 1
                     trio_symbol_payouts[label] = trio_symbol_payouts.get(label, 0) + trio_pay
+            for label in race_labels:
+                trio_symbol_races[label] = trio_symbol_races.get(label, 0) + 1
+            if trio_hit:
                 trio_total_payout += trio_pay
                 if trio_pay == 0:
                     trio_missing_payouts += 1
                 trio_symbol_details.append({"R": rid, "着順": "-".join(finish[:3]),
-                                            "記号組合せ": " / ".join(sorted(labels)),
+                                            "記号組合せ": hit_label,
                                             "3連複払戻": trio_pay})
             trio_stats["対象R"] += 1
             trio_stats["購入点数"] += len(trio_tickets)
@@ -670,7 +683,7 @@ with tab_result:
     st.divider()
     st.divider()
     st.subheader("◎軸｜3連複 ◎－無・β・ε－全【本日入力分】")
-    st.caption("2列目は通常無印と妙味β・ε、3列目は全車。記号集計は『◎・無・β・ε・他』のみ。『他』は2列目の対象でない車を指します。")
+    st.caption("買い目は◎－無・β・ε－全車。集計では各車の通常印（◎○▲△×）を優先し、通常無印は『無』に統一。3列目も実際の記号で表示します。")
     trio_points = trio_stats["購入点数"]
     trio_races = trio_stats["対象R"]
     trio_cost = trio_points * 100
@@ -687,13 +700,20 @@ with tab_result:
     if trio_missing_payouts:
         st.warning(f"3連複の的中{trio_missing_payouts}Rで払戻が未入力です。回収率は暫定値です。")
     st.markdown("**的中した記号の組み合わせ別集計**")
-    st.caption("『無』は車番による区別なし。無とβ・εが同じ車の場合は複数の記号に該当するため、行の的中数・払戻を単純合計しないでください。投資・回収率は上の全体集計で確認します。")
+    st.caption("3列目を含め各車の記号を表示。各購入券を一意に分類し、投資・払戻を重複なく集計。回収率は100円平買いで算出します。")
     symbol_table = pd.DataFrame([{
-        "記号組合せ": k, "的中R": v, "対象R比%": pct(v, trio_races),
-        "的中払戻合計": trio_symbol_payouts.get(k, 0),
-    } for k, v in sorted(trio_symbol_counts.items(), key=lambda kv: (-kv[1], kv[0]))],
-        columns=["記号組合せ", "的中R", "対象R比%", "的中払戻合計"])
-    show_full_table(symbol_table)
+        "記号組合せ": k,
+        "対象R": trio_symbol_races.get(k, 0),
+        "購入点数": n,
+        "投資額": n * 100,
+        "的中数": trio_symbol_counts.get(k, 0),
+        "的中率%（点数比）": pct(trio_symbol_counts.get(k, 0), n),
+        "払戻合計": trio_symbol_payouts.get(k, 0),
+        "収支": trio_symbol_payouts.get(k, 0) - n * 100,
+        "回収率%": pct(trio_symbol_payouts.get(k, 0), n * 100),
+    } for k, n in sorted(trio_symbol_stakes.items(), key=lambda kv: (-trio_symbol_counts.get(kv[0], 0), kv[0]))],
+        columns=["記号組合せ", "対象R", "購入点数", "投資額", "的中数", "的中率%（点数比）", "払戻合計", "収支", "回収率%"])
+    show_full_table(style_roi(symbol_table))
     with st.expander("3連複・記号組み合わせのレース別内訳"):
         if trio_symbol_details:
             show_full_table(pd.DataFrame(trio_symbol_details))
