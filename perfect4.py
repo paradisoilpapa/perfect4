@@ -15,7 +15,7 @@ import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ集計｜◎・α比較", layout="wide")
 st.title("ヴェロビ集計｜通常◎・妙味α 比較")
-st.caption("通常評価と妙味軸評価を独立集計。2車単は軸の表裏のみ、3連単なし。各買い目100円平買い換算。")
+st.caption("通常評価と妙味軸評価を独立集計。◎→×・無印2車も比較。3連単なし。各買い目100円平買い換算。")
 
 GROUP_MARKS = {
     "通常": ("◎", "○", "▲", "△", "×"),
@@ -38,6 +38,10 @@ BET_PAIRS = {g: all_axis_pairs(marks) for g, marks in GROUP_MARKS.items()}
 
 
 def blank_bet():
+    return {"N": 0, "H": 0, "SUM": 0, "KSUM": 0}
+
+
+def blank_unmarked():
     return {"N": 0, "H": 0, "SUM": 0, "KSUM": 0}
 
 
@@ -178,27 +182,29 @@ with tab_daily:
         "印は各グループ4～5車を入力。片方だけの入力も可。"
         "着順は3着まで。払戻は100円あたりの2車単払戻金です。"
         "落車・失格等は集計除外にチェックしてください。"
+        "車数は7車が初期値です。6車立ては6に変更してください。"
     )
     with st.form("daily_input_form"):
-        cols = st.columns([0.55, 1.5, 1.5, 1.0, 1.0, 0.85])
+        cols = st.columns([0.5, 1.4, 1.4, 0.9, 0.9, 0.7, 0.75])
         for col, title in zip(cols, [
-            "R", "通常印順 ◎○▲△×", "妙味印順 αβγεΩ", "着順", "2車単", "集計除外"
+            "R", "通常印順 ◎○▲△×", "妙味印順 αβγεΩ", "着順", "2車単", "車数", "集計除外"
         ]):
             col.markdown(f"**{title}**")
         daily_rows = []
         for i in range(1, 101):
-            c1, c2, c3, c4, c5, c6 = st.columns([0.55, 1.5, 1.5, 1.0, 1.0, 0.85])
+            c1, c2, c3, c4, c5, c6, c7 = st.columns([0.5, 1.4, 1.4, 0.9, 0.9, 0.7, 0.75])
             rid = c1.text_input("R", value=str(i), key=f"rid_{i}", label_visibility="collapsed")
             normal = c2.text_input("通常印順", value="", key=f"mark_{i}", label_visibility="collapsed")
             alpha = c3.text_input("妙味印順", value="", key=f"alpha_mark_{i}", label_visibility="collapsed")
             finish = c4.text_input("着順", value="", key=f"fin_{i}", label_visibility="collapsed")
             pay = c5.number_input("2車単", min_value=0, value=0, step=10,
                                   key=f"pay2t_{i}", label_visibility="collapsed")
-            exclude = c6.checkbox("除外", value=False, key=f"exclude_{i}",
+            field_size = c6.selectbox("車数", options=[7, 6], key=f"field_size_{i}", label_visibility="collapsed")
+            exclude = c7.checkbox("除外", value=False, key=f"exclude_{i}",
                                   label_visibility="collapsed")
             daily_rows.append({
                 "race": rid, "normal": normal, "alpha": alpha,
-                "finish": finish, "pay": int(pay), "exclude": bool(exclude)
+                "finish": finish, "pay": int(pay), "field_size": int(field_size), "exclude": bool(exclude)
             })
         st.form_submit_button("日次入力を反映")
 
@@ -208,6 +214,7 @@ with tab_daily:
 # ============================================================
 carry_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 carry_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
+carry_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
 
 with tab_carry:
     st.subheader("前日までの集計（累積・引継ぎ）")
@@ -258,6 +265,17 @@ with tab_carry:
                 }
                 if h > n:
                     st.warning(f"{group} {a}→{b}: 的中Hが対象Nを超えています。")
+        st.markdown("### 通常評価｜◎→×・無印2車（引継ぎ）")
+        st.caption("◎→×は上の通常評価2車単から自動引継ぎします。無印1・2の過去分がある場合のみ入力してください。過去の無印実績が不明なら0のまま、新規分から集計します。")
+        for label in ("◎→無印1", "◎→無印2"):
+            c0, c1, c2, c3 = st.columns([2.4, 1.0, 1.3, 1.3])
+            c0.markdown(f"**{label}**")
+            n = c1.number_input("対象N", min_value=0, step=1, key=f"unmarked_n_{label}", label_visibility="collapsed")
+            h = c2.number_input("的中H", min_value=0, step=1, key=f"unmarked_h_{label}", label_visibility="collapsed")
+            summ = c3.number_input("払戻合計", min_value=0, step=10, key=f"unmarked_sum_{label}", label_visibility="collapsed")
+            carry_unmarked[label] = {"N": int(n), "H": int(h), "SUM": int(summ), "KSUM": int(n)}
+            if h > n:
+                st.warning(f"{label}: 的中Hが対象Nを超えています。")
         st.form_submit_button("前日までの集計を反映")
 
 
@@ -266,6 +284,7 @@ with tab_carry:
 # ============================================================
 daily_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 daily_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
+daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
 valid_races = {g: 0 for g in GROUP_MARKS}
 excluded_races = 0
 warnings: List[str] = []
@@ -277,6 +296,7 @@ for entry in daily_rows:
     raw_alpha = str(entry["alpha"]).strip()
     raw_finish = str(entry["finish"]).strip()
     payout = int(entry["pay"])
+    field_size = int(entry["field_size"])
     exclude = bool(entry["exclude"])
 
     if not any([raw_normal, raw_alpha, raw_finish, payout > 0, exclude]):
@@ -299,7 +319,7 @@ for entry in daily_rows:
     detail = {
         "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
         "着順": "-".join(finish[:3]), "2車単払戻": payout,
-        "集計除外": ""
+        "集計除外": "", "◎→×無無": "未集計"
     }
     for group, raw in (("通常", raw_normal), ("妙味", raw_alpha)):
         if not raw:
@@ -337,6 +357,32 @@ for entry in daily_rows:
                 if payout <= 0:
                     warnings.append(f"R{rid}: {group} {a}→{b} 的中ですが払戻が0です。")
         detail[f"{group}的中"] = " / ".join(hits) if hits else "なし"
+        if group == "通常":
+            # 5印のあるレースだけ、残る車番を無印として確定する。
+            # 6車なら無印1車、7車なら無印2車。4印では判定しない。
+            if len(marks) == 5 and all(1 <= int(v) <= field_size for v in marks.values()) and all(1 <= int(v) <= field_size for v in finish):
+                unknown = sorted(set(str(v) for v in range(1, field_size + 1)) - set(marks.values()), key=int)
+                targets = [("◎→×", marks["×"])] + [(f"◎→無印{i}", car) for i, car in enumerate(unknown, 1)]
+                if len(unknown) == field_size - 5:
+                    hit_names = []
+                    for name, second_car in targets:
+                        if name not in daily_unmarked:
+                            continue
+                        rec_u = daily_unmarked[name]
+                        rec_u["N"] += 1
+                        rec_u["KSUM"] += 1
+                        if finish[0] == marks["◎"] and finish[1] == second_car:
+                            rec_u["H"] += 1
+                            rec_u["SUM"] += payout
+                            hit_names.append(name)
+                            if payout <= 0:
+                                warnings.append(f"R{rid}: {name}的中ですが払戻が0です。")
+                    detail["◎→×無無"] = " / ".join(hit_names) if hit_names else "なし"
+            elif len(marks) == 4:
+                detail["◎→×無無"] = "×未入力・対象外"
+            else:
+                warnings.append(f"R{rid}: 車数と車番が一致しないため◎→×無無を集計しません。")
+                detail["◎→×無無"] = "車数不一致・対象外"
     race_details.append(detail)
 
 
@@ -354,6 +400,29 @@ for group, marks in GROUP_MARKS.items():
         pair: add_records(carry_bet_records[group][pair], daily_bet_records[group][pair],
                           ("N", "H", "SUM", "KSUM")) for pair in BET_PAIRS[group]
     }
+
+
+total_unmarked = {
+    name: add_records(carry_unmarked[name], daily_unmarked[name], ("N", "H", "SUM", "KSUM"))
+    for name in daily_unmarked
+}
+
+
+def unmarked_summary(records):
+    """◎→×と無印を合計。実際に対象となった点数を分母にする。"""
+    keys = ("◎→×", "◎→無印1", "◎→無印2")
+    n = max(int(records[k]["N"]) for k in keys)
+    ksum = sum(int(records[k]["KSUM"]) for k in keys)
+    h = sum(int(records[k]["H"]) for k in keys)
+    summ = sum(int(records[k]["SUM"]) for k in keys)
+    return {"評価": "通常・穴相手", "3点セット": "◎→×・無印・無印", "対象R（参考）": n,
+            "購入点数": ksum, "投資額": ksum * 100, "的中数": h,
+            "平均的中配当": round(summ / h, 1) if h else None,
+            "払戻合計": summ, "回収率%": pct(summ, ksum * 100)}
+
+
+def unmarked_frame(records):
+    return pd.DataFrame([bet_row(k, records[k]) for k in ("◎→×", "◎→無印1", "◎→無印2")])
 
 
 def mark_frame(group, records):
@@ -400,7 +469,14 @@ with tab_result:
     summary_df = pd.DataFrame([
         set_summary(group, total_bet_records) for group in GROUP_MARKS
     ])
+    # 比較表では◎→×の既存表裏集計を利用。引継ぎを二重入力させない。
+    total_unmarked["◎→×"] = dict(total_bet_records["通常"][("◎", "×")])
+    summary_df = pd.concat([summary_df, pd.DataFrame([unmarked_summary(total_unmarked)])], ignore_index=True)
     show_full_table(style_roi(summary_df))
+
+    st.subheader("通常評価｜◎→×・無印・無印【累積】")
+    st.caption("無印1・2は未評価車番の小さい順。6車立ては無印1車で2点、7車立ては3点。通常印5車が揃ったレースだけ無印を判定します。◎→×は上の既存集計を共用します。")
+    show_full_table(style_roi(unmarked_frame(total_unmarked)))
 
     for group in GROUP_MARKS:
         st.divider()
@@ -417,8 +493,12 @@ with tab_result:
         today_df = pd.DataFrame([
             set_summary(group, daily_bet_records) for group in GROUP_MARKS
         ])
+        today_unmarked = dict(daily_unmarked)
+        today_df = pd.concat([today_df, pd.DataFrame([unmarked_summary(today_unmarked)])], ignore_index=True)
         st.markdown("#### 3点セット｜本日分")
         show_full_table(style_roi(today_df))
+        st.markdown("#### ◎→×・無印・無印｜本日分")
+        show_full_table(style_roi(unmarked_frame(today_unmarked)))
         for group in GROUP_MARKS:
             st.markdown(f"#### {group}評価｜印別入賞率（本日分）")
             show_full_table(mark_frame(group, daily_mark_records).style.format({
@@ -435,6 +515,11 @@ with tab_result:
 
     st.divider()
     st.subheader("CSVダウンロード")
+    st.download_button(
+        "◎→×・無印・無印 CSV",
+        data=unmarked_frame(total_unmarked).to_csv(index=False).encode("utf-8-sig"),
+        file_name="velovi_unmarked_exacta.csv", mime="text/csv"
+    )
     st.download_button(
         "◎・α 3点セット比較CSV",
         data=summary_df.to_csv(index=False).encode("utf-8-sig"),
