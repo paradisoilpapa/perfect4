@@ -344,6 +344,9 @@ daily_wide_unmarked = {name: blank_bet() for name in wide_unmarked_names}
 # 3連複：◎軸、相手は通常無印1・2と妙味β・ε（重複車番は1車扱い）。
 trio_stats = {"対象R": 0, "購入点数": 0, "的中数": 0, "的中R": 0}
 trio_detail = []
+trio_symbol_counts = {}
+trio_normal_counts = {}
+trio_symbol_details = []
 valid_races = {g: 0 for g in GROUP_MARKS}
 excluded_races = 0
 warnings: List[str] = []
@@ -458,6 +461,35 @@ for entry in daily_rows:
                 (str(v) for v in range(1, field_size + 1) if str(v) != trio_axis), 2
             ) if a in trio_others or b in trio_others]
             trio_hit = frozenset(finish[:3]) in trio_tickets
+            # 的中した3車の記号組合せを集計。無印は車番順に区別しない。
+            # 通常印の組合せは1レース1分類。β/εは同じ車の追加タグなので
+            # 重複解釈を別表にし、合計が的中Rを超え得ることを明示する。
+            if trio_hit and trio_axis in finish[:3]:
+                other_cars = [car for car in finish[:3] if car != trio_axis]
+                normal_by_car = {car: mark for mark, car in trio_normal.items()}
+                def normal_tag(car):
+                    return normal_by_car.get(car, "無")
+                def sort_tags(tags):
+                    rank = {"○": 0, "▲": 1, "△": 2, "×": 3, "無": 4, "β": 5, "ε": 6}
+                    return tuple(sorted(tags, key=lambda x: (rank.get(x, 99), x)))
+                nkey = "◎－" + "－".join(sort_tags([normal_tag(c) for c in other_cars]))
+                trio_normal_counts[nkey] = trio_normal_counts.get(nkey, 0) + 1
+                choices = []
+                for car in other_cars:
+                    tags = {normal_tag(car)}
+                    for mark in ("β", "ε"):
+                        if trio_value.get(mark) == car:
+                            tags.add(mark)
+                    choices.append(tags)
+                race_labels = set()
+                for a in choices[0]:
+                    for b in choices[1]:
+                        race_labels.add("◎－" + "－".join(sort_tags([a, b])))
+                for label in race_labels:
+                    trio_symbol_counts[label] = trio_symbol_counts.get(label, 0) + 1
+                trio_symbol_details.append({"R": rid, "着順": "-".join(finish[:3]),
+                                            "通常印組合せ": nkey,
+                                            "β・ε重複を含む表記": " / ".join(sorted(race_labels))})
             trio_stats["対象R"] += 1
             trio_stats["購入点数"] += len(trio_tickets)
             trio_stats["的中数"] += int(trio_hit)
@@ -645,6 +677,21 @@ with tab_result:
         "投資額（100円換算）": trio_points * 100,
     }])
     show_full_table(trio_summary)
+    st.markdown("**3連複・的中時の記号組合せ（通常印、重複なし）**")
+    st.caption("無印は『無』で統一。◎を含み、2列目の無・β・εのいずれかに該当して的中したレースだけを分類。各レースは1行だけに計上します。")
+    normal_table = pd.DataFrame([{"記号組合せ": k, "的中R": v, "対象R比%": pct(v, trio_races)}
+                                 for k, v in sorted(trio_normal_counts.items(), key=lambda kv: (-kv[1], kv[0]))],
+                                columns=["記号組合せ", "的中R", "対象R比%"])
+    show_full_table(normal_table)
+    st.markdown("**β・εを重ねた記号組合せ（重複あり）**")
+    st.caption("β・εは通常印とは別評価。同じ車が『無』と『β』なら両方の組合せに計上します。各行の的中Rは数えられますが、行の合計は全体的中Rと一致しません。")
+    symbol_table = pd.DataFrame([{"記号組合せ": k, "的中R": v, "対象R比%": pct(v, trio_races)}
+                                 for k, v in sorted(trio_symbol_counts.items(), key=lambda kv: (-kv[1], kv[0]))],
+                                columns=["記号組合せ", "的中R", "対象R比%"])
+    show_full_table(symbol_table)
+    with st.expander("3連複・記号組合せのレース別内訳"):
+        if trio_symbol_details:
+            show_full_table(pd.DataFrame(trio_symbol_details))
     with st.expander("3連複のレース別判定を見る"):
         if trio_detail:
             show_full_table(pd.DataFrame(trio_detail))
@@ -702,6 +749,8 @@ with tab_result:
 
     st.divider()
     st.subheader("CSVダウンロード")
+    st.download_button("3連複 記号組合せCSV（通常印）", data=normal_table.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_normal_symbols.csv", mime="text/csv")
+    st.download_button("3連複 記号組合せCSV（β・ε重複含む）", data=symbol_table.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_overlap_symbols.csv", mime="text/csv")
     st.download_button("3連複 ◎－無無βε－全 レース別CSV", data=pd.DataFrame(trio_detail, columns=["R", "◎", "相手候補", "購入点数", "着順", "的中"]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_unmarked_beta_epsilon.csv", mime="text/csv")
     st.download_button(
         "◎→×・無印・無印 CSV",
