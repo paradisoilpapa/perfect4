@@ -40,20 +40,23 @@ BET_PAIRS = {g: all_axis_pairs(marks) for g, marks in GROUP_MARKS.items()}
 
 
 def parse_wide_payouts(entries, finish, rid, warnings):
-    """的中ワイド3組の車番・100円払戻を個別入力。未入力は未記録。"""
+    """ワイド的中組の車番と100円払戻を別枠から照合する。"""
     result = {}
     allowed = {frozenset(pair) for pair in ((finish[0], finish[1]), (finish[0], finish[2]), (finish[1], finish[2]))}
-    for idx, raw in enumerate(entries, 1):
-        raw = str(raw or "").strip()
-        if not raw:
+    for idx, (raw_pair, raw_money) in enumerate(entries, 1):
+        raw_pair = str(raw_pair or "").strip()
+        amount = int(raw_money or 0)
+        if not raw_pair and amount == 0:
             continue
-        m = re.fullmatch(r"\s*([1-9])\s*[-－ー=：:,/]\s*([1-9])\s*[:：=,/]\s*([0-9,]+)\s*", raw)
+        if not raw_pair:
+            warnings.append(f"R{rid}: ワイド{idx}の車番が未入力です。")
+            continue
+        m = re.fullmatch(r"\s*([1-9])\s*[-－ー=：:,/]?\s*([1-9])\s*", raw_pair)
         if not m:
-            warnings.append(f"R{rid}: ワイド{idx}は『1-2:350』の形式で入力してください。")
+            warnings.append(f"R{rid}: ワイド{idx}の車番は『1-2』または『12』で入力してください。")
             continue
-        a, b, money = m.groups()
+        a, b = m.groups()
         pair = frozenset((a, b))
-        amount = int(money.replace(",", ""))
         if len(pair) != 2 or pair not in allowed:
             warnings.append(f"R{rid}: ワイド{idx}の{a}-{b}は着順上位3車の組み合わせではありません。")
             continue
@@ -61,7 +64,7 @@ def parse_wide_payouts(entries, finish, rid, warnings):
             warnings.append(f"R{rid}: ワイド{idx}の{a}-{b}は重複入力です。")
             continue
         if amount <= 0:
-            warnings.append(f"R{rid}: ワイド{idx}の払戻が0円です。")
+            warnings.append(f"R{rid}: ワイド{idx}の{a}-{b}の払戻金を入力してください。")
             continue
         result[pair] = amount
     return result
@@ -214,7 +217,7 @@ with tab_daily:
         "落車・失格等は集計除外にチェックしてください。"
         "車数は7車が初期値です。6車立ては6に変更してください。"
     )
-    st.caption("ワイドは的中した最大3組を別々に入力します。例：1-2:350、1-3:480、2-3:720。的中しない組は空欄で構いません。")
+    st.caption("ワイドは最大3組。車番と払戻金を別枠で入力します（例：車番 1-2、払戻 350円）。")
     with st.form("daily_input_form"):
         daily_rows = []
         for i in range(1, 101):
@@ -227,12 +230,13 @@ with tab_daily:
             finish = c4.text_input("着順（3着まで）", value="", key=f"fin_{i}")
             pay = c5.number_input("2車単払戻", min_value=0, value=0, step=10,
                                   key=f"pay2t_{i}")
-            w1, w2, w3 = st.columns(3)
-            wide_entries = (
-                w1.text_input("ワイド的中① 車番:払戻", key=f"wide_pair1_{i}", placeholder="例 1-2:350"),
-                w2.text_input("ワイド的中② 車番:払戻", key=f"wide_pair2_{i}", placeholder="例 1-3:480"),
-                w3.text_input("ワイド的中③ 車番:払戻", key=f"wide_pair3_{i}", placeholder="例 2-3:720"),
-            )
+            st.caption("ワイド的中組（車番・払戻を別入力）")
+            wide_entries = []
+            for j in range(1, 4):
+                wc, wp = st.columns([1.0, 1.0])
+                pair = wc.text_input(f"ワイド{j} 車番", key=f"wide_pair{j}_{i}", placeholder="例 1-2")
+                money = wp.number_input(f"ワイド{j} 払戻（円）", min_value=0, value=0, step=10, key=f"wide_pay{j}_{i}")
+                wide_entries.append((pair, int(money)))
             field_size = c6.selectbox("車数", options=[7, 6], key=f"field_size_{i}")
             exclude = c7.checkbox("集計除外", value=False, key=f"exclude_{i}")
             daily_rows.append({
@@ -349,14 +353,14 @@ for entry in daily_rows:
     field_size = int(entry["field_size"])
     exclude = bool(entry["exclude"])
 
-    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, any(str(v).strip() for v in wide_entries), exclude]):
+    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, any(str(pair).strip() or money > 0 for pair, money in wide_entries), exclude]):
         continue
 
     if exclude:
         excluded_races += 1
         race_details.append({
             "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
-            "着順": raw_finish, "2車単払戻": payout, "ワイド的中組": " / ".join(x for x in wide_entries if x),
+            "着順": raw_finish, "2車単払戻": payout, "ワイド的中組": " / ".join(f"{pair}:{money}" for pair, money in wide_entries if pair or money),
             "集計除外": "除外", "通常的中": "集計除外", "妙味的中": "集計除外"
         })
         continue
@@ -368,7 +372,7 @@ for entry in daily_rows:
 
     detail = {
         "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
-        "着順": "-".join(finish[:3]), "2車単払戻": payout, "ワイド的中組": " / ".join(x for x in wide_entries if x),
+        "着順": "-".join(finish[:3]), "2車単払戻": payout, "ワイド的中組": " / ".join(f"{pair}:{money}" for pair, money in wide_entries if pair or money),
         "集計除外": "", "◎→×無無": "未集計"
     }
     for group, raw in (("通常", raw_normal), ("妙味", raw_alpha)):
