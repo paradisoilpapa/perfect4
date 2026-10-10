@@ -488,6 +488,7 @@ for entry in daily_rows:
             hit_ticket = frozenset(finish[:3]) if trio_hit else None
             hit_label = ""
             race_labels = set()
+            race_ticket_labels = []
             for ticket in trio_tickets:
                 others = ticket - {trio_axis}
                 eligible = [(car, candidate_by_car[car]) for car in others if car in candidate_by_car]
@@ -498,11 +499,17 @@ for entry in daily_rows:
                 third_car = next(iter(others - {candidate_car}))
                 label = f"◎－{candidate_mark}－{third_tag(third_car)}"
                 race_labels.add(label)
+                race_ticket_labels.append(label)
                 trio_symbol_stakes[label] = trio_symbol_stakes.get(label, 0) + 1
                 if ticket == hit_ticket:
                     hit_label = label
                     trio_symbol_counts[label] = trio_symbol_counts.get(label, 0) + 1
                     trio_symbol_payouts[label] = trio_symbol_payouts.get(label, 0) + trio_pay
+            # 各購入券がちょうど1つの記号分類に入っていることを検算。
+            if len(race_ticket_labels) != len(trio_tickets):
+                raise AssertionError(f"R{rid}: 3連複の記号別購入点数が一致しません")
+            if trio_hit and not hit_label:
+                raise AssertionError(f"R{rid}: 的中買い目の記号分類がありません")
             for label in race_labels:
                 trio_symbol_races[label] = trio_symbol_races.get(label, 0) + 1
             if trio_hit:
@@ -690,6 +697,15 @@ with tab_result:
     st.divider()
     st.subheader("◎軸｜3連複 ◎－無・β・ε－全【本日入力分】")
     st.caption("買い目は◎－無・β・ε－全車。集計では各車の通常印（◎○▲△×）を優先し、通常無印は『無』に統一。3列目も実際の記号で表示します。")
+    if sum(trio_symbol_stakes.values()) != trio_stats["購入点数"]:
+        st.error("3連複の記号別購入点数が全体と一致しません。")
+        st.stop()
+    if sum(trio_symbol_counts.values()) != trio_stats["的中数"]:
+        st.error("3連複の記号別的中数が全体と一致しません。")
+        st.stop()
+    if sum(trio_symbol_payouts.values()) != trio_total_payout:
+        st.error("3連複の記号別払戻が全体と一致しません。")
+        st.stop()
     trio_points = trio_stats["購入点数"]
     trio_races = trio_stats["対象R"]
     trio_cost = trio_points * 100
@@ -706,7 +722,7 @@ with tab_result:
     if trio_missing_payouts:
         st.warning(f"3連複の的中{trio_missing_payouts}Rで払戻が未入力です。回収率は暫定値です。")
     st.markdown("**的中した記号の組み合わせ別集計**")
-    st.caption("3列目を含め各車の記号を表示。各購入券を一意に分類し、投資・払戻を重複なく集計。回収率は100円平買いで算出します。")
+    st.caption("◎－無・β・ε－全の購入券だけを分類。2列目は無→β→εを優先し、3列目は通常印（○▲△×無）を表示。各券は1分類のみ。回収率は記号分類ごとの投資額（点数×100円）で計算。")
     symbol_table = pd.DataFrame([{
         "記号組合せ": k,
         "対象R": trio_symbol_races.get(k, 0),
