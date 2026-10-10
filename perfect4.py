@@ -11,6 +11,7 @@
 """
 from typing import Dict, List, Tuple
 import re
+from itertools import combinations
 import pandas as pd
 import streamlit as st
 
@@ -340,6 +341,9 @@ daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1
 daily_wides = {mark: blank_bet() for mark in WIDE_TARGETS}
 wide_unmarked_names = ("◎－無印1", "◎－無印2", "◎－無印合計", "◎－無印∩β/ε")
 daily_wide_unmarked = {name: blank_bet() for name in wide_unmarked_names}
+# 3連複：◎軸、相手は通常無印1・2と妙味β・ε（重複車番は1車扱い）。
+trio_stats = {"対象R": 0, "購入点数": 0, "的中数": 0, "的中R": 0}
+trio_detail = []
 valid_races = {g: 0 for g in GROUP_MARKS}
 excluded_races = 0
 warnings: List[str] = []
@@ -439,6 +443,33 @@ for entry in daily_rows:
             else:
                 warnings.append(f"R{rid}: 車数と車番が一致しないため◎→×無無を集計しません。")
                 detail["◎→×無無"] = "車数不一致・対象外"
+    # 3連複は配当未入力でも着順3車だけで判定。◎固定・残り2車の組合せ。
+    trio_normal = parse_markline(raw_normal, "通常") if raw_normal else {}
+    trio_value = parse_markline(raw_alpha, "妙味") if raw_alpha else {}
+    if (len(trio_normal) == 5 and len(trio_value) >= 4
+            and all(1 <= int(v) <= field_size for v in trio_normal.values())
+            and all(1 <= int(v) <= field_size for v in trio_value.values())
+            and all(1 <= int(v) <= field_size for v in finish[:3])):
+        trio_unmarked = sorted(set(str(v) for v in range(1, field_size + 1)) - set(trio_normal.values()), key=int)
+        if len(trio_unmarked) == field_size - 5:
+            trio_axis = trio_normal["◎"]
+            trio_others = sorted(({*trio_unmarked, trio_value.get("β"), trio_value.get("ε")} - {None, trio_axis}), key=int)
+            trio_tickets = [frozenset((trio_axis, a, b)) for a, b in combinations(
+                (str(v) for v in range(1, field_size + 1) if str(v) != trio_axis), 2
+            ) if a in trio_others or b in trio_others]
+            trio_hit = frozenset(finish[:3]) in trio_tickets
+            trio_stats["対象R"] += 1
+            trio_stats["購入点数"] += len(trio_tickets)
+            trio_stats["的中数"] += int(trio_hit)
+            trio_stats["的中R"] += int(trio_hit)
+            trio_detail.append({"R": rid, "◎": trio_axis, "相手候補": "・".join(trio_others),
+                                "購入点数": len(trio_tickets), "着順": "-".join(finish[:3]),
+                                "的中": "○" if trio_hit else "×"})
+            detail["3連複 ◎－無無βε－全"] = "的中" if trio_hit else "外れ"
+        else:
+            detail["3連複 ◎－無無βε－全"] = "車数不一致・対象外"
+    else:
+        detail["3連複 ◎－無無βε－全"] = "印不足・対象外"
     wide_payout_map = parse_wide_payouts(wide_entries, finish, rid, warnings)
     # 無印は通常印5車が揃う場合のみ特定できる。◎－無印は1車ごとに100円。
     # ◎－無印∩β/εは無印車番とβまたはεが一致する場合のみ購入。
@@ -603,6 +634,23 @@ with tab_result:
 
     st.divider()
     st.divider()
+    st.subheader("◎軸｜3連複 ◎－無印1・無印2・β・ε－全【本日入力分】")
+    st.caption("1列目◎、2列目は通常無印1・2と妙味β・ε（重複除外）、3列目は全車。◎を含む3車組のうち、残り2車の少なくとも1車が2列目候補なら購入。7車立て・2列目4車なら最大14点／R。着順だけで判定、配当入力不要。引継ぎには含めません。")
+    trio_points = trio_stats["購入点数"]
+    trio_races = trio_stats["対象R"]
+    trio_summary = pd.DataFrame([{
+        "対象R": trio_races, "購入点数": trio_points,
+        "的中数": trio_stats["的中数"],
+        "的中率%（対象R比）": round(100 * trio_stats["的中R"] / trio_races, 1) if trio_races else None,
+        "投資額（100円換算）": trio_points * 100,
+    }])
+    show_full_table(trio_summary)
+    with st.expander("3連複のレース別判定を見る"):
+        if trio_detail:
+            show_full_table(pd.DataFrame(trio_detail))
+        else:
+            st.info("通常5印と妙味β・ε、および着順3車が入力されたレースを集計します。")
+
     st.subheader("◎軸｜ワイド β／ε【累積】")
     st.caption("◎－βと◎－εを各100円で検証。◎と相手が同一車番の場合は不成立として除外。ワイド払戻は的中した車番の組ごとに個別入力します。")
     show_full_table(style_roi(pd.DataFrame([wide_summary(total_wides)])))
@@ -654,6 +702,7 @@ with tab_result:
 
     st.divider()
     st.subheader("CSVダウンロード")
+    st.download_button("3連複 ◎－無無βε－全 レース別CSV", data=pd.DataFrame(trio_detail, columns=["R", "◎", "相手候補", "購入点数", "着順", "的中"]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_unmarked_beta_epsilon.csv", mime="text/csv")
     st.download_button(
         "◎→×・無印・無印 CSV",
         data=unmarked_frame(total_unmarked).to_csv(index=False).encode("utf-8-sig"),
