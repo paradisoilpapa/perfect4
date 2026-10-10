@@ -346,6 +346,12 @@ daily_wide_x = blank_bet()
 # 2車複：◎－無印（全無印車）、◎－×。日次入力のみ。
 daily_quinella = {name: blank_bet() for name in ('◎－○', '◎－▲', '◎－△', '◎－×', '◎－無印合計', '◎－β', '◎－ε')}
 quinella_missing_payouts = 0
+# 全2車複：通常／妙味それぞれの5印＋残り無印を全組み合わせで検証。
+# 集計は日次入力のみ。引継ぎの集計値から未記録の組み合わせは復元できない。
+quinella_all_records = {g: {} for g in GROUP_MARKS}
+quinella_all_races = {g: 0 for g in GROUP_MARKS}
+quinella_all_missing = {g: 0 for g in GROUP_MARKS}
+quinella_all_order = {g: list(GROUP_MARKS[g]) + ["無印1", "無印2"] for g in GROUP_MARKS}
 wide_unmarked_names = ("◎－無印1", "◎－無印2", "◎－無印合計", "◎－無印∩β/ε")
 daily_wide_unmarked = {name: blank_bet() for name in wide_unmarked_names}
 # 3連複：◎軸、相手は通常無印1・2と妙味β・ε（重複車番は1車扱い）。
@@ -538,6 +544,35 @@ for entry in daily_rows:
             detail["3連複 ◎－無無βε－全"] = "車数不一致・対象外"
     else:
         detail["3連複 ◎－無無βε－全"] = "印不足・対象外"
+    # 2車複・全通り：各評価の5印＋無印1・2で全21通り（6車なら15通り）。
+    # 無印1・2は、その評価で印のない車番を小さい順に割り当てる。
+    # 同一レースで各評価は別集計。的中は1組のみで、払戻は2車複入力を使う。
+    for q_group, q_raw in (("通常", raw_normal), ("妙味", raw_alpha)):
+        q_all_marks = parse_markline(q_raw, q_group) if q_raw else {}
+        if len(q_all_marks) != 5 or not all(1 <= int(v) <= field_size for v in q_all_marks.values()):
+            continue
+        if not all(1 <= int(v) <= field_size for v in finish[:2]):
+            continue
+        q_remaining = sorted(set(str(v) for v in range(1, field_size + 1)) - set(q_all_marks.values()), key=int)
+        if len(q_remaining) != field_size - 5:
+            continue
+        q_labeled = dict(q_all_marks)
+        q_labeled.update({f"無印{i}": car for i, car in enumerate(q_remaining, 1)})
+        q_order = [label for label in quinella_all_order[q_group] if label in q_labeled]
+        quinella_all_races[q_group] += 1
+        for left, right in combinations(q_order, 2):
+            key = (left, right)
+            rec = quinella_all_records[q_group].setdefault(key, blank_bet())
+            rec["N"] += 1
+            rec["KSUM"] += 1
+            if {q_labeled[left], q_labeled[right]} == set(finish[:2]):
+                rec["H"] += 1
+                if quinella_pay > 0:
+                    rec["SUM"] += quinella_pay
+                else:
+                    quinella_all_missing[q_group] += 1
+                    warnings.append(f"R{rid}: {q_group}2車複 {left}－{right} 的中ですが払戻未入力です。")
+
     # 2車複：通常印4～5車、妙味印4～5車。車番が重なる買い目も分類ごとに独立検証。
     q_marks = parse_markline(raw_normal, "通常") if raw_normal else {}
     q_value_marks = parse_markline(raw_alpha, "妙味") if raw_alpha else {}
@@ -808,6 +843,48 @@ with tab_result:
     show_full_table(style_roi(q_df))
     if quinella_missing_payouts:
         st.warning(f"2車複の的中{quinella_missing_payouts}件（記号別の延べ件数）で払戻が未入力です。回収率は暫定値です。")
+
+    st.divider()
+    st.subheader("2車複｜全通り・軸別集計【本日入力分】")
+    st.caption("通常と妙味を独立検証。7車立ては各21組、6車立ては各15組。無印1・2は各評価の未評価車を車番昇順で割り当て。各券100円平買い。軸－全は自分以外の全車を各100円で購入した仮想成績です。")
+    st.caption("個別の的中率は対象レース数に対する割合。軸－全の的中率は1レースにつき1組以上当たった割合（軸の連対率）であり、回収率の分母は全購入点数です。引継ぎ値は含みません。")
+    quinella_all_exports = {}
+    quinella_axis_exports = {}
+    for q_group in GROUP_MARKS:
+        q_records = quinella_all_records[q_group]
+        q_order = quinella_all_order[q_group]
+        q_rows = []
+        for left, right in combinations(q_order, 2):
+            rec = q_records.get((left, right))
+            if rec and rec["N"]:
+                q_rows.append(bet_row(f"{left}－{right}", rec))
+        q_individual_df = pd.DataFrame(q_rows, columns=["買い目", "対象R", "購入点数", "投資額", "的中数", "的中率%", "払戻合計", "平均的中配当", "回収率%"])
+        q_axis_rows = []
+        for axis in q_order:
+            selected = [rec for (a, b), rec in q_records.items() if axis in (a, b)]
+            if not selected:
+                continue
+            n = max(int(rec["N"]) for rec in selected)
+            ksum = sum(int(rec["KSUM"]) for rec in selected)
+            hits = sum(int(rec["H"]) for rec in selected)
+            payout_sum = sum(int(rec["SUM"]) for rec in selected)
+            q_axis_rows.append({
+                "買い方": f"{axis}－全", "対象R": n, "購入点数": ksum,
+                "投資額": ksum * 100, "的中R": hits, "的中率%": pct(hits, n),
+                "払戻合計": payout_sum, "収支": payout_sum - ksum * 100,
+                "回収率%": pct(payout_sum, ksum * 100),
+            })
+        q_axis_df = pd.DataFrame(q_axis_rows, columns=["買い方", "対象R", "購入点数", "投資額", "的中R", "的中率%", "払戻合計", "収支", "回収率%"])
+        quinella_all_exports[q_group] = q_individual_df
+        quinella_axis_exports[q_group] = q_axis_df
+        st.markdown(f"#### {q_group}評価｜軸－全（{quinella_all_races[q_group]}R）")
+        show_full_table(style_roi(q_axis_df))
+        with st.expander(f"{q_group}評価｜2車複 全組み合わせ個別成績", expanded=True):
+            show_full_table(style_roi(q_individual_df))
+        if quinella_all_missing[q_group]:
+            st.warning(f"{q_group}評価：2車複の的中{quinella_all_missing[q_group]}件で払戻未入力。回収率は暫定値です。")
+        st.download_button(f"{q_group}・2車複 全組み合わせCSV", data=q_individual_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"velovi_quinella_all_{'normal' if q_group == '通常' else 'value'}.csv", mime="text/csv")
+        st.download_button(f"{q_group}・2車複 軸－全CSV", data=q_axis_df.to_csv(index=False).encode("utf-8-sig"), file_name=f"velovi_quinella_axis_{'normal' if q_group == '通常' else 'value'}.csv", mime="text/csv")
 
     st.subheader("◎軸｜ワイド β／ε【累積】")
     st.caption("◎－βと◎－εを各100円で検証。◎と相手が同一車番の場合は不成立として除外。ワイド払戻は的中した車番の組ごとに個別入力します。")
