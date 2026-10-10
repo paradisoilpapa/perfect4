@@ -504,6 +504,7 @@ def unmarked_frame(records):
     return pd.DataFrame([bet_row(k, records[k]) for k in ("◎→×", "◎→無印1", "◎→無印2")])
 
 
+def wide_frame(records):
     return pd.DataFrame([bet_row(f"◎－{m}", records[m]) for m in WIDE_TARGETS])
 
 
