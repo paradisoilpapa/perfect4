@@ -340,6 +340,8 @@ daily_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 daily_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
 daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
 daily_wides = {mark: blank_bet() for mark in WIDE_TARGETS}
+# ◎－×：通常評価の×を相手とするワイド。既存の払戻入力を再利用。
+daily_wide_x = blank_bet()
 wide_unmarked_names = ("◎－無印1", "◎－無印2", "◎－無印合計", "◎－無印∩β/ε")
 daily_wide_unmarked = {name: blank_bet() for name in wide_unmarked_names}
 # 3連複：◎軸、相手は通常無印1・2と妙味β・ε（重複車番は1車扱い）。
@@ -532,6 +534,26 @@ for entry in daily_rows:
     else:
         detail["3連複 ◎－無無βε－全"] = "印不足・対象外"
     wide_payout_map = parse_wide_payouts(wide_entries, finish, rid, warnings)
+    # ◎－× ワイド：有効な通常印が揃ったレースのみ1点購入。
+    x_marks = parse_markline(raw_normal, "通常") if raw_normal else {}
+    if len(x_marks) == 5 and all(1 <= int(v) <= field_size for v in x_marks.values()):
+        x_axis, x_car = x_marks["◎"], x_marks["×"]
+        if x_axis != x_car:
+            daily_wide_x["N"] += 1
+            daily_wide_x["KSUM"] += 1
+            x_hit = x_axis in finish[:3] and x_car in finish[:3]
+            if x_hit:
+                daily_wide_x["H"] += 1
+                x_pair = frozenset((x_axis, x_car))
+                if x_pair in wide_payout_map:
+                    daily_wide_x["SUM"] += wide_payout_map[x_pair]
+                else:
+                    warnings.append(f"R{rid}: ワイド◎－×的中（{x_axis}-{x_car}）ですが払戻が未入力です。")
+            detail["ワイド ◎－×"] = "的中" if x_hit else "外れ"
+        else:
+            detail["ワイド ◎－×"] = "不成立"
+    else:
+        detail["ワイド ◎－×"] = "印不足・対象外"
     # 無印は通常印5車が揃う場合のみ特定できる。◎－無印は1車ごとに100円。
     # ◎－無印∩β/εは無印車番とβまたはεが一致する場合のみ購入。
     um_marks = parse_markline(raw_normal, "通常") if raw_normal else {}
@@ -748,6 +770,10 @@ with tab_result:
     show_full_table(style_roi(pd.DataFrame([wide_summary(total_wides)])))
     show_full_table(style_roi(wide_frame(total_wides)))
 
+    st.subheader("◎軸｜ワイド ◎－×【本日入力分】")
+    st.caption("通常評価の◎と×を各レース100円で購入した想定。的中は両車が3着以内。既存のワイド車番・払戻3組を利用します。過去の引継ぎ分は含みません。")
+    show_full_table(style_roi(pd.DataFrame([bet_row("◎－×", daily_wide_x)])))
+
     st.subheader("◎軸｜ワイド 無印・β/ε重複【本日入力分】")
     st.caption("通常印5車から無印を判定。◎－無印合計は無印1・2を各100円で購入した計算。重複抽出は無印とβまたはεが同じ車番の買い目だけ。過去の引継ぎ集計には無印ワイドの項目がないため、この表は日次入力分のみです。")
     show_full_table(style_roi(wide_unmarked_frame(daily_wide_unmarked)))
@@ -806,6 +832,8 @@ with tab_result:
         data=summary_df.to_csv(index=False).encode("utf-8-sig"),
         file_name="velovi_axis_3point_summary.csv", mime="text/csv"
     )
+    st.download_button("ワイド ◎－× CSV", data=pd.DataFrame([bet_row("◎－×", daily_wide_x)]).to_csv(index=False).encode("utf-8-sig"),
+                       file_name="velovi_wide_x_daily.csv", mime="text/csv")
     st.download_button("ワイド ◎－無印・重複抽出 CSV", data=wide_unmarked_frame(daily_wide_unmarked).to_csv(index=False).encode("utf-8-sig"),
                        file_name="velovi_wide_unmarked_daily.csv", mime="text/csv")
     st.download_button("ワイド ◎－β／ε CSV", data=wide_frame(total_wides).to_csv(index=False).encode("utf-8-sig"),
