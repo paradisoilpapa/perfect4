@@ -185,30 +185,29 @@ with tab_daily:
         "落車・失格等は集計除外にチェックしてください。"
         "車数は7車が初期値です。6車立ては6に変更してください。"
     )
+    st.caption("入力欄を2段に分割しました。画面幅が狭くても数字が隠れず、横スクロール不要です。")
     with st.form("daily_input_form"):
-        cols = st.columns([0.5, 1.4, 1.4, 0.85, 0.8, 0.8, 0.6, 0.7])
-        for col, title in zip(cols, [
-            "R", "通常印順 ◎○▲△×", "妙味印順 αβγεΩ", "着順", "2車単", "ワイド", "車数", "集計除外"
-        ]):
-            col.markdown(f"**{title}**")
         daily_rows = []
         for i in range(1, 101):
-            c1, c2, c3, c4, c5, c10, c6, c7 = st.columns([0.5, 1.4, 1.4, 0.85, 0.8, 0.8, 0.6, 0.7])
-            rid = c1.text_input("R", value=str(i), key=f"rid_{i}", label_visibility="collapsed")
-            normal = c2.text_input("通常印順", value="", key=f"mark_{i}", label_visibility="collapsed")
-            alpha = c3.text_input("妙味印順", value="", key=f"alpha_mark_{i}", label_visibility="collapsed")
-            finish = c4.text_input("着順", value="", key=f"fin_{i}", label_visibility="collapsed")
-            pay = c5.number_input("2車単", min_value=0, value=0, step=10,
-                                  key=f"pay2t_{i}", label_visibility="collapsed")
-            paywide = c10.number_input("ワイド", min_value=0, value=0, step=10,
-                                         key=f"paywide_{i}", label_visibility="collapsed")
-            field_size = c6.selectbox("車数", options=[7, 6], key=f"field_size_{i}", label_visibility="collapsed")
-            exclude = c7.checkbox("除外", value=False, key=f"exclude_{i}",
-                                  label_visibility="collapsed")
+            st.markdown(f"**{i}R**")
+            c1, c2, c3 = st.columns([1.0, 2.0, 2.0])
+            rid = c1.text_input("R番号", value=str(i), key=f"rid_{i}")
+            normal = c2.text_input("通常印順 ◎○▲△×", value="", key=f"mark_{i}")
+            alpha = c3.text_input("妙味印順 αβγεΩ", value="", key=f"alpha_mark_{i}")
+            c4, c5, c10, c6, c7 = st.columns([1.15, 1.15, 1.15, 0.9, 0.75])
+            finish = c4.text_input("着順（3着まで）", value="", key=f"fin_{i}")
+            pay = c5.number_input("2車単払戻", min_value=0, value=0, step=10,
+                                  key=f"pay2t_{i}")
+            paywide = c10.number_input("ワイド払戻", min_value=0, value=0, step=10,
+                                       key=f"paywide_{i}")
+            field_size = c6.selectbox("車数", options=[7, 6], key=f"field_size_{i}")
+            exclude = c7.checkbox("集計除外", value=False, key=f"exclude_{i}")
             daily_rows.append({
                 "race": rid, "normal": normal, "alpha": alpha,
-                "finish": finish, "pay": int(pay), "paywide": int(paywide), "field_size": int(field_size), "exclude": bool(exclude)
+                "finish": finish, "pay": int(pay), "paywide": int(paywide),
+                "field_size": int(field_size), "exclude": bool(exclude)
             })
+            st.divider()
         st.form_submit_button("日次入力を反映")
 
 
