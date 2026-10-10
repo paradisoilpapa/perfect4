@@ -415,7 +415,7 @@ def unmarked_summary(records):
     ksum = sum(int(records[k]["KSUM"]) for k in keys)
     h = sum(int(records[k]["H"]) for k in keys)
     summ = sum(int(records[k]["SUM"]) for k in keys)
-    return {"評価": "通常・穴相手", "3点セット": "◎→×・無印・無印", "対象R（参考）": n,
+    return {"評価": "通常・穴相手", "3点セット": "◎→×・無印・無印", "対象R": int(n),
             "購入点数": ksum, "投資額": ksum * 100, "的中数": h,
             "平均的中配当": round(summ / h, 1) if h else None,
             "払戻合計": summ, "回収率%": pct(summ, ksum * 100)}
@@ -446,7 +446,7 @@ def set_summary(group, records):
     return {
         "評価": group,
         "3点セット": f"{axis}→{'・'.join(SET_TARGETS[group])}",
-        "対象R（共通下限）": n,
+        "対象R": int(n),
         "購入点数": ksum,
         "投資額": ksum * 100,
         "的中数": h,
