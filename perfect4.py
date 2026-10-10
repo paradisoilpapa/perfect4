@@ -468,29 +468,35 @@ for entry in daily_rows:
                 (str(v) for v in range(1, field_size + 1) if str(v) != trio_axis), 2
             ) if a in trio_others or b in trio_others]
             trio_hit = frozenset(finish[:3]) in trio_tickets
-            # 通常評価の印を最優先し、通常印がない車だけ妙味β・εを採用。
-            # 無印と妙味印が重なる場合は「無」を優先。
-            # 3列目「全」は買い目の範囲であり、集計上の記号ではない。
+            # 2列目の資格（無・β・ε）と3列目の通常印を混同しない。
+            # 2列目の車番を先に確定し、3列目は残りの車番を通常印で表示する。
+            # 2列目に複数の該当車があるときは 無 > β > ε の優先順で一意に分類。
+            # ◎－○－▲ のように2列目条件を満たさないラベルは生成しない。
             normal_by_car = {car: mark for mark, car in trio_normal.items()}
-            def trio_tag(car):
-                if car in normal_by_car:
-                    return normal_by_car[car]
-                if car in trio_unmarked:
-                    return "無"
-                if trio_value.get("β") == car:
-                    return "β"
-                if trio_value.get("ε") == car:
-                    return "ε"
-                raise ValueError(f"R{rid}: 車番{car}の記号が判定できません")
+            candidate_by_car = {}
+            for car in trio_unmarked:
+                if car != trio_axis:
+                    candidate_by_car[car] = "無"
+            for candidate_mark in ("β", "ε"):
+                car = trio_value.get(candidate_mark)
+                if car and car != trio_axis and car not in candidate_by_car:
+                    candidate_by_car[car] = candidate_mark
 
-            rank = {"◎": 0, "○": 1, "▲": 2, "△": 3, "×": 4, "無": 5, "β": 6, "ε": 7}
+            def third_tag(car):
+                return normal_by_car.get(car, "無")
+
             hit_ticket = frozenset(finish[:3]) if trio_hit else None
             hit_label = ""
             race_labels = set()
             for ticket in trio_tickets:
-                other_cars = list(ticket - {trio_axis})
-                tags = sorted((trio_tag(car) for car in other_cars), key=lambda x: rank[x])
-                label = "◎－" + "－".join(tags)
+                others = ticket - {trio_axis}
+                eligible = [(car, candidate_by_car[car]) for car in others if car in candidate_by_car]
+                if not eligible:
+                    raise AssertionError(f"R{rid}: 2列目候補を含まない買い目 {ticket}")
+                # 同じ買い目を複数分類しない。無・β・ε の順に代表の2列目を選ぶ。
+                candidate_car, candidate_mark = min(eligible, key=lambda t: ({"無": 0, "β": 1, "ε": 2}[t[1]], int(t[0])))
+                third_car = next(iter(others - {candidate_car}))
+                label = f"◎－{candidate_mark}－{third_tag(third_car)}"
                 race_labels.add(label)
                 trio_symbol_stakes[label] = trio_symbol_stakes.get(label, 0) + 1
                 if ticket == hit_ticket:
