@@ -234,7 +234,7 @@ with tab_daily:
             wide_entries = []
             for j in range(1, 4):
                 wc, wp = st.columns([1.0, 1.0])
-                pair = wc.text_input(f"ワイド{j} 車番", key=f"wide_pair{j}_{i}", placeholder="例 1-2")
+                pair = wc.text_input(f"ワイド{j} 車番", key=f"wide_pair{j}_{i}", placeholder="例 12")
                 money = wp.number_input(f"ワイド{j} 払戻（円）", min_value=0, value=0, step=10, key=f"wide_pay{j}_{i}")
                 wide_entries.append((pair, int(money)))
             field_size = c6.selectbox("車数", options=[7, 6], key=f"field_size_{i}")
@@ -338,6 +338,8 @@ daily_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 daily_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
 daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
 daily_wides = {mark: blank_bet() for mark in WIDE_TARGETS}
+wide_unmarked_names = ("◎－無印1", "◎－無印2", "◎－無印合計", "◎－無印∩β/ε")
+daily_wide_unmarked = {name: blank_bet() for name in wide_unmarked_names}
 valid_races = {g: 0 for g in GROUP_MARKS}
 excluded_races = 0
 warnings: List[str] = []
@@ -438,6 +440,27 @@ for entry in daily_rows:
                 warnings.append(f"R{rid}: 車数と車番が一致しないため◎→×無無を集計しません。")
                 detail["◎→×無無"] = "車数不一致・対象外"
     wide_payout_map = parse_wide_payouts(wide_entries, finish, rid, warnings)
+    # 無印は通常印5車が揃う場合のみ特定できる。◎－無印は1車ごとに100円。
+    # ◎－無印∩β/εは無印車番とβまたはεが一致する場合のみ購入。
+    um_marks = parse_markline(raw_normal, "通常") if raw_normal else {}
+    value_marks = parse_markline(raw_alpha, "妙味") if raw_alpha else {}
+    if len(um_marks) == 5 and all(1 <= int(v) <= field_size for v in um_marks.values()):
+        um_cars = sorted(set(str(v) for v in range(1, field_size + 1)) - set(um_marks.values()), key=int)
+        if len(um_cars) == field_size - 5:
+            overlap = set(um_cars) & {value_marks.get("β"), value_marks.get("ε")}
+            for idx, car in enumerate(um_cars, 1):
+                for name in (f"◎－無印{idx}", "◎－無印合計") + (("◎－無印∩β/ε",) if car in overlap else ()):
+                    rec = daily_wide_unmarked[name]
+                    rec["N"] += 1
+                    rec["KSUM"] += 1
+                    if um_marks["◎"] in finish[:3] and car in finish[:3]:
+                        rec["H"] += 1
+                        pair_key = frozenset((um_marks["◎"], car))
+                        if pair_key in wide_payout_map:
+                            rec["SUM"] += wide_payout_map[pair_key]
+                        else:
+                            warnings.append(f"R{rid}: ワイド{name}的中（{um_marks['◎']}-{car}）ですが払戻が未入力です。")
+
     nm = parse_markline(raw_normal, "通常") if raw_normal else {}
     am = parse_markline(raw_alpha, "妙味") if raw_alpha else {}
     # ワイドは着順上位3車に◎とβ/εが両方入れば的中（順不同）。
@@ -502,6 +525,10 @@ def unmarked_summary(records):
 
 def unmarked_frame(records):
     return pd.DataFrame([bet_row(k, records[k]) for k in ("◎→×", "◎→無印1", "◎→無印2")])
+
+
+def wide_unmarked_frame(records):
+    return pd.DataFrame([bet_row(name, records[name]) for name in ("◎－無印合計", "◎－無印∩β/ε", "◎－無印1", "◎－無印2")])
 
 
 def wide_frame(records):
@@ -581,6 +608,10 @@ with tab_result:
     show_full_table(style_roi(pd.DataFrame([wide_summary(total_wides)])))
     show_full_table(style_roi(wide_frame(total_wides)))
 
+    st.subheader("◎軸｜ワイド 無印・β/ε重複【本日入力分】")
+    st.caption("通常印5車から無印を判定。◎－無印合計は無印1・2を各100円で購入した計算。重複抽出は無印とβまたはεが同じ車番の買い目だけ。過去の引継ぎ集計には無印ワイドの項目がないため、この表は日次入力分のみです。")
+    show_full_table(style_roi(wide_unmarked_frame(daily_wide_unmarked)))
+
     for group in GROUP_MARKS:
         st.divider()
         st.subheader(f"{group}評価｜印別 入賞率【累積】")
@@ -602,6 +633,8 @@ with tab_result:
         show_full_table(style_roi(today_df))
         st.markdown("#### ◎→×・無印・無印｜本日分")
         show_full_table(style_roi(unmarked_frame(today_unmarked)))
+        st.markdown("#### ワイド ◎－無印・重複抽出｜本日分")
+        show_full_table(style_roi(wide_unmarked_frame(daily_wide_unmarked)))
         st.markdown("#### ワイド ◎－β／ε｜本日分")
         show_full_table(style_roi(pd.DataFrame([wide_summary(daily_wides)])))
         show_full_table(style_roi(wide_frame(daily_wides)))
@@ -631,6 +664,8 @@ with tab_result:
         data=summary_df.to_csv(index=False).encode("utf-8-sig"),
         file_name="velovi_axis_3point_summary.csv", mime="text/csv"
     )
+    st.download_button("ワイド ◎－無印・重複抽出 CSV", data=wide_unmarked_frame(daily_wide_unmarked).to_csv(index=False).encode("utf-8-sig"),
+                       file_name="velovi_wide_unmarked_daily.csv", mime="text/csv")
     st.download_button("ワイド ◎－β／ε CSV", data=wide_frame(total_wides).to_csv(index=False).encode("utf-8-sig"),
                        file_name="velovi_wide_beta_epsilon.csv", mime="text/csv")
     for group in GROUP_MARKS:
