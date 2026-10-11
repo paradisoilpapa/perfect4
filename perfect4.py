@@ -811,12 +811,21 @@ with tab_result:
         quinella_named_total[label] for label in
         ("◎－○", "◎－▲", "◎－△", "◎－×", "◎－無印合計")
     )
+    # 妙味評価はα軸の買い目別記録を使用。2車複は21組の引継ぎと日次入力を合算。
+    exacta_alpha = sum_bets(
+        total_bet_records["妙味"][("α", m)] for m in GROUP_MARKS["妙味"][1:]
+    )
+    quinella_alpha = sum_bets(
+        quinella_all_total["妙味"][("α", m)] for m in GROUP_MARKS["妙味"][1:]
+    )
     primary = pd.DataFrame([
         compact_result("2車単 ◎→全", exacta_diamond),
+        compact_result("2車単 α→全", exacta_alpha),
         compact_result("2車複 ◎－全", quinella_diamond),
+        compact_result("2車複 α－全", quinella_alpha),
     ])
     show_full_table(style_roi(primary))
-    st.caption("2車単：◎→○▲△×の4点／2車複：◎－○▲△×・無印1/2の最大6点。過去分は各券種の引継ぎ欄を反映（重複加算なし）。")
+    st.caption("通常◎軸と妙味α軸を別々に集計。2車単は各4点、2車複のα軸は印相手4点。過去分は対応する引継ぎ欄を反映します。")
 
     st.subheader("2車単｜◎軸・買い目別【累積】")
     # ◎以外の軸→全は作らず、個別買い目は常時一覧表示。
@@ -832,6 +841,17 @@ with tab_result:
     show_full_table(style_roi(q_df))
     if quinella_missing_payouts:
         st.warning(f"2車複：的中{quinella_missing_payouts}件で払戻未入力。回収率は暫定値です。")
+
+    st.subheader("2車単｜妙味評価 α軸・買い目別【累積】")
+    value_exacta_rows = [compact_result(f"α→{m}", total_bet_records["妙味"][("α", m)])
+                          for m in GROUP_MARKS["妙味"][1:]]
+    show_full_table(style_roi(pd.DataFrame(value_exacta_rows)))
+
+    st.subheader("2車複｜妙味評価 α軸・買い目別【累積】")
+    value_quinella_rows = [compact_result(f"α－{m}", quinella_all_total["妙味"][("α", m)])
+                            for m in GROUP_MARKS["妙味"][1:]]
+    show_full_table(style_roi(pd.DataFrame(value_quinella_rows)))
+    st.caption("妙味2車複は『全組み合わせ（過去分引継ぎ）』の妙味評価欄を使用します。未入力の過去分は0として扱います。")
 
     st.subheader("ワイド｜買い目別【累積】")
     show_full_table(style_roi(wide_frame(total_wides)))
@@ -878,7 +898,7 @@ with tab_result:
             show_full_table(pd.DataFrame(race_details).fillna(""))
 
     st.divider()
-    st.download_button("◎軸｜2車単・2車複 集計CSV", data=primary.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_diamond_axis.csv", mime="text/csv")
+    st.download_button("◎・α軸｜2車単・2車複 集計CSV", data=primary.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_diamond_axis.csv", mime="text/csv")
 
     st.subheader("個別CSV（必要な場合のみ）")
     st.download_button(
