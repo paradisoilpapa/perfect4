@@ -274,6 +274,21 @@ with tab_carry:
         "妙味評価はα軸の成績を新規入力。旧版の他の2車単は転記不要です。"
         "引継ぎ対象Nは各印・買い目ごとに入力できます。"
     )
+    st.markdown("""#### まず入力する数字の意味
+**過去分**とは、今回の「日次入力」に入っていないレースの集計です。日次欄にも同じレースを残している場合、引継ぎにも入れると二重計上になります。
+
+| 項目 | 入力する値 | 例：過去44Rで◎－▲が7回的中、払戻計1,920円 |
+|---|---|---|
+| 対象R（対象N） | その買い目を判定できた過去レース数 | **44** |
+| 購入点数 | 対象期間にその買い目を各100円で買ったと仮定した合計口数 | **44**（毎R1点なら対象Rと同じ） |
+| 的中数（的中H） | その買い目が当たった回数 | **7** |
+| 払戻合計（SUM） | 当たり券の**100円あたりの払戻金を合計**した金額 | **1,920** |
+
+上の例は「**通常評価・2車複の◎－▲**」の欄に **44 / 7 / 1920** と入れます。回収率は自動計算されるので入力不要です。
+
+**入力元：** 以前の集計アプリに表示された「対象R・購入点数・的中数・払戻合計」を、**同じ券種・同じ印の組み合わせ**の欄へ転記してください。**2車単と2車複、通常印と妙味印は別物**です。過去の集計値が分からない欄は **0のまま**にし、推測値を入れないでください。
+""")
+    st.warning("重要：下の『全21組』と『記号別比較』は同じレースを別の切り口で示す**別々の集計表**です。それぞれの過去集計がある場合だけ転記します。両方へ入力しても各表の中で二重加算はしません。『無印合計』は1Rにつき通常2点（7車立て）、個別の『無印1』『無印2』は各1点です。")
     with st.form("carryover_form"):
         for group, marks in GROUP_MARKS.items():
             st.markdown(f"### {group}評価｜印別 入賞回数（引継ぎ）")
@@ -340,7 +355,7 @@ with tab_carry:
             if h > n:
                 st.warning(f"ワイド ◎－{mark}: 的中Hが対象Nを超えています。")
         st.markdown("### 2車複｜全組み合わせ（過去分引継ぎ）")
-        st.caption("通常・妙味を別々に引継ぎ。対象R、的中数、払戻合計を入力。購入点数は対象Rと同数です。")
+        st.caption("列は左から【組み合わせ｜対象R｜的中数｜払戻合計（円）】。通常と妙味を別々に入力。7車立ての各組は1R1点なので購入点数＝対象Rです。例：◎－▲なら 44｜7｜1920。")
         for cg in GROUP_MARKS:
             with st.expander(f"{cg}評価・2車複21組の引継ぎ"):
                 for ca, cb in combinations(list(GROUP_MARKS[cg]) + ["無印1", "無印2"], 2):
@@ -352,6 +367,7 @@ with tab_carry:
                     cs = cc[3].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
                     carry_quinella_all[cg][(ca, cb)] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cn)}
         st.markdown("### 2車複｜記号別比較（過去分引継ぎ）")
+        st.caption("列は【買い目｜対象R｜購入点数｜的中数｜払戻合計（円）】。◎－無印合計は無印1・2を両方買うため、7車44Rなら対象R44・購入点数88。◎－▲は44・44・7・1920。上の全21組の数字をこちらへ**自動転記はしません**。元データがある行だけ入力してください。")
         for label in daily_quinella_labels:
             cc = st.columns([2, 1, 1, 1, 1])
             cc[0].markdown(label)
@@ -362,6 +378,7 @@ with tab_carry:
             cs = cc[4].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
             carry_quinella_named[label] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cp)}
         st.markdown("### ワイド｜追加検証分（過去分引継ぎ）")
+        st.caption("列は【買い目｜対象R｜購入点数｜的中数｜払戻合計（円）】。ワイドは2車複と払戻金が違います。以前のワイド集計がなければ0のままにしてください。")
         for label in ["◎－×", *wide_unmarked_labels]:
             cc = st.columns([2, 1, 1, 1, 1])
             cc[0].markdown(label)
@@ -372,13 +389,14 @@ with tab_carry:
             cs = cc[4].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
             carry_wide_extra[label] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cp)}
         st.markdown("### 3連複｜全体・記号別（過去分引継ぎ）")
+        st.caption("対象R＝対象となったレース数、購入点数＝全レースの実際の候補点数の合計、的中R＝的中したレース数、払戻合計＝100円当たり払戻の合計。例：10Rで各3点なら購入点数30。過去の3連複データがなければすべて0です。")
         c3a,c3b,c3c,c3d = st.columns(4)
         carry_trio = {"N":int(c3a.number_input("3連複 対象R",min_value=0,key="carry_trio_n")),
                       "KSUM":int(c3b.number_input("3連複 購入点数",min_value=0,key="carry_trio_points")),
                       "H":int(c3c.number_input("3連複 的中R",min_value=0,key="carry_trio_h")),
                       "SUM":int(c3d.number_input("3連複 払戻合計",min_value=0,step=10,key="carry_trio_sum"))}
         st.caption("記号別の過去集計がある場合は、下欄に『記号,対象R,購入点数,的中数,払戻合計』を1行ずつ入力してください。全体集計とは別に集計します。")
-        carry_trio_symbol_raw = st.text_area("3連複 記号別引継ぎ", key="carry_trio_symbol_raw", height=100, placeholder="◎－無－▲,12,120,2,1800")
+        carry_trio_symbol_raw = st.text_area("3連複 記号別引継ぎ", key="carry_trio_symbol_raw", height=100, placeholder="◎－無－▲,12,36,2,1800")
         st.form_submit_button("前日までの集計を反映")
 
 
