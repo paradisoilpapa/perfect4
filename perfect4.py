@@ -804,40 +804,50 @@ with tab_result:
     exacta_diamond = sum_bets(
         total_bet_records["通常"][("◎", m)] for m in GROUP_MARKS["通常"][1:]
     )
-    q_records_normal = quinella_all_total["通常"]
+    # 2車複の過去引継ぎは「記号別比較」側にも存在する。
+    # 全21組の引継ぎが未入力でも、◎軸の記号別引継ぎから累積を表示する。
+    # 21組側と記号別側を加算すると二重計上するため、◎軸は記号別のみを採用。
     quinella_diamond = sum_bets(
-        rec for pair, rec in q_records_normal.items() if "◎" in pair
+        quinella_named_total[label] for label in
+        ("◎－○", "◎－▲", "◎－△", "◎－×", "◎－無印合計")
     )
     primary = pd.DataFrame([
         compact_result("2車単 ◎→全", exacta_diamond),
         compact_result("2車複 ◎－全", quinella_diamond),
     ])
     show_full_table(style_roi(primary))
-    st.caption("2車単の『全』は○▲△×への4点。2車複の『全』は○▲△×と無印1・2への最大6点。成立した買い目のみ集計。")
+    st.caption("2車単：◎→○▲△×の4点／2車複：◎－○▲△×・無印1/2の最大6点。過去分は各券種の引継ぎ欄を反映（重複加算なし）。")
 
-    st.subheader("◎軸｜買い方別の成績")
-    summary_df = pd.DataFrame([set_summary(g, total_bet_records) for g in GROUP_MARKS])
-    total_unmarked["◎→×"] = dict(total_bet_records["通常"][("◎", "×")])
-    summary_df = pd.concat([summary_df, pd.DataFrame([unmarked_summary(total_unmarked)])], ignore_index=True)
-    with st.expander("2車単｜3点セット・無印との比較", expanded=False):
-        show_full_table(style_roi(summary_df))
-        show_full_table(style_roi(unmarked_frame(total_unmarked)))
+    st.subheader("2車単｜◎軸・買い目別【累積】")
+    # ◎以外の軸→全は作らず、個別買い目は常時一覧表示。
+    exacta_rows = [compact_result(f"◎→{m}", total_bet_records["通常"][("◎", m)])
+                   for m in GROUP_MARKS["通常"][1:]]
+    exacta_rows += [compact_result(name, total_unmarked[name])
+                    for name in ("◎→無印1", "◎→無印2")]
+    show_full_table(style_roi(pd.DataFrame(exacta_rows)))
 
-    q_df = pd.DataFrame([compact_result(name, quinella_named_total[name]) for name in daily_quinella])
-    with st.expander("2車複｜◎－○・▲・△・×・無印・β・ε", expanded=False):
-        show_full_table(style_roi(q_df))
-        if quinella_missing_payouts:
-            st.warning(f"2車複：的中{quinella_missing_payouts}件で払戻未入力。回収率は暫定値です。")
+    st.subheader("2車複｜◎軸・買い目別【累積】")
+    q_df = pd.DataFrame([compact_result(name, quinella_named_total[name])
+                         for name in daily_quinella_labels])
+    show_full_table(style_roi(q_df))
+    if quinella_missing_payouts:
+        st.warning(f"2車複：的中{quinella_missing_payouts}件で払戻未入力。回収率は暫定値です。")
 
-    with st.expander("ワイド｜◎軸の成績", expanded=False):
-        show_full_table(style_roi(pd.DataFrame([wide_summary(total_wides)])))
-        show_full_table(style_roi(wide_frame(total_wides)))
-        show_full_table(style_roi(pd.DataFrame([compact_result("◎－×", wide_x_total)])))
-        st.caption("無印ワイドの過去引継ぎ欄は未実装のため、以下は本日入力分のみです。")
-        show_full_table(style_roi(wide_unmarked_frame(wide_unmarked_total)))
+    st.subheader("ワイド｜買い目別【累積】")
+    show_full_table(style_roi(wide_frame(total_wides)))
+    show_full_table(style_roi(pd.DataFrame([compact_result("◎－×", wide_x_total)])))
+    show_full_table(style_roi(wide_unmarked_frame(wide_unmarked_total)))
+
+    st.subheader("印着内率【累積】")
+    for group in GROUP_MARKS:
+        st.markdown(f"**{group}評価**")
+        show_full_table(mark_frame(group, total_mark_records).style.format({
+            "1着率%": "{:.1f}", "連対率%": "{:.1f}", "印着内率%": "{:.1f}"
+        }, na_rep="—"))
 
     quinella_all_exports = {}
-    with st.expander("詳細｜2車複の全組み合わせ個別成績", expanded=False):
+    with st.expander("2車複｜全組み合わせの詳細（◎軸以外も含む）", expanded=False):
+        st.caption("こちらは21組の個別検証です。上の◎軸累積表とは引継ぎ入力欄が別です。")
         for q_group in GROUP_MARKS:
             q_rows = []
             for left, right in combinations(quinella_all_order[q_group], 2):
@@ -848,17 +858,10 @@ with tab_result:
             quinella_all_exports[q_group] = q_individual_df
             st.markdown(f"**{q_group}評価**")
             show_full_table(style_roi(q_individual_df))
-            if quinella_all_missing[q_group]:
-                st.warning(f"{q_group}評価：的中{quinella_all_missing[q_group]}件で払戻未入力。")
 
-    with st.expander("詳細｜印着内率・2車単の個別買い目", expanded=False):
-        for group in GROUP_MARKS:
-            st.markdown(f"**{group}評価｜印着内率**")
-            show_full_table(mark_frame(group, total_mark_records).style.format({
-                "1着率%": "{:.1f}", "連対率%": "{:.1f}", "印着内率%": "{:.1f}"
-            }, na_rep="—"))
-            st.markdown(f"**{group}評価｜2車単（◎／αの表裏）**")
-            show_full_table(style_roi(bet_frame(group, total_bet_records)))
+    summary_df = pd.DataFrame([set_summary(g, total_bet_records) for g in GROUP_MARKS])
+    total_unmarked["◎→×"] = dict(total_bet_records["通常"][("◎", "×")])
+    summary_df = pd.concat([summary_df, pd.DataFrame([unmarked_summary(total_unmarked)])], ignore_index=True)
 
     with st.expander("本日分だけの成績", expanded=False):
         today_df = pd.DataFrame([set_summary(group, daily_bet_records) for group in GROUP_MARKS])
@@ -875,8 +878,7 @@ with tab_result:
             show_full_table(pd.DataFrame(race_details).fillna(""))
 
     st.divider()
-    with st.expander("CSVダウンロード", expanded=False):
-        st.download_button("◎軸｜2車単・2車複 集計CSV", data=primary.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_diamond_axis.csv", mime="text/csv")
+    st.download_button("◎軸｜2車単・2車複 集計CSV", data=primary.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_diamond_axis.csv", mime="text/csv")
 
     st.subheader("個別CSV（必要な場合のみ）")
     st.download_button(
