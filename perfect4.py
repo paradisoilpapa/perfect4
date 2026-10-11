@@ -775,26 +775,6 @@ for g in GROUP_MARKS:
 quinella_named_total = {name:add_records(daily_quinella[name],carry_quinella_named.get(name,blank_bet()),("N","H","SUM","KSUM")) for name in daily_quinella}
 wide_x_total = add_records(daily_wide_x,carry_wide_extra.get("◎－×",blank_bet()),("N","H","SUM","KSUM"))
 wide_unmarked_total = {name:add_records(daily_wide_unmarked[name],carry_wide_extra.get(name,blank_bet()),("N","H","SUM","KSUM")) for name in daily_wide_unmarked}
-trio_total_rec = add_records({"N":trio_stats["対象R"],"KSUM":trio_stats["購入点数"],"H":trio_stats["的中R"],"SUM":trio_total_payout},carry_trio,("N","H","SUM","KSUM"))
-carry_trio_symbols = {}
-for lineno, rawline in enumerate(carry_trio_symbol_raw.splitlines(),1):
-    if not rawline.strip(): continue
-    cells = [x.strip() for x in rawline.replace("，",",").split(",")]
-    if len(cells) != 5:
-        warnings.append(f"3連複記号別引継ぎ {lineno}行目: 5項目必要です")
-        continue
-    try:
-        name = cells[0]
-        n,k,h,pay = map(int,cells[1:])
-        if min(n,k,h,pay)<0: raise ValueError()
-        if name in carry_trio_symbols: raise ValueError()
-        carry_trio_symbols[name] = {"N":n,"KSUM":k,"H":h,"SUM":pay}
-    except ValueError:
-        warnings.append(f"3連複記号別引継ぎ {lineno}行目: 数値または重複記号が不正です")
-trio_symbol_total = {}
-for name in set(trio_symbol_stakes) | set(carry_trio_symbols):
-    prev = carry_trio_symbols.get(name,blank_bet())
-    trio_symbol_total[name] = {"N":trio_symbol_races.get(name,0)+prev["N"],"KSUM":trio_symbol_stakes.get(name,0)+prev["KSUM"],"H":trio_symbol_counts.get(name,0)+prev["H"],"SUM":trio_symbol_payouts.get(name,0)+prev["SUM"]}
 
 with tab_result:
     st.subheader("◎軸とα軸｜累積比較")
