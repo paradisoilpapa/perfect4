@@ -259,6 +259,14 @@ carry_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
 carry_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
 carry_wides = {mark: blank_bet() for mark in WIDE_TARGETS}
 
+daily_quinella_labels = ('◎－○', '◎－▲', '◎－△', '◎－×', '◎－無印合計', '◎－β', '◎－ε')
+wide_unmarked_labels = ("◎－無印1", "◎－無印2", "◎－無印合計", "◎－無印∩β/ε")
+carry_quinella_all = {g:{} for g in GROUP_MARKS}
+carry_quinella_named = {}
+carry_wide_extra = {}
+carry_trio = {"N":0,"KSUM":0,"H":0,"SUM":0}
+carry_trio_symbol_raw = ""
+
 with tab_carry:
     st.subheader("前日までの集計（累積・引継ぎ）")
     st.caption(
@@ -331,6 +339,46 @@ with tab_carry:
             carry_wides[mark] = {"N": int(n), "H": int(h), "SUM": int(summ), "KSUM": int(n)}
             if h > n:
                 st.warning(f"ワイド ◎－{mark}: 的中Hが対象Nを超えています。")
+        st.markdown("### 2車複｜全組み合わせ（過去分引継ぎ）")
+        st.caption("通常・妙味を別々に引継ぎ。対象R、的中数、払戻合計を入力。購入点数は対象Rと同数です。")
+        for cg in GROUP_MARKS:
+            with st.expander(f"{cg}評価・2車複21組の引継ぎ"):
+                for ca, cb in combinations(list(GROUP_MARKS[cg]) + ["無印1", "無印2"], 2):
+                    cc = st.columns([2, 1, 1, 1])
+                    cc[0].markdown(f"{ca}－{cb}")
+                    ck = f"carry_qall_{'n' if cg == '通常' else 'v'}_{ca}_{cb}"
+                    cn = cc[1].number_input("対象R", min_value=0, key=ck+"_n", label_visibility="collapsed")
+                    ch = cc[2].number_input("的中数", min_value=0, key=ck+"_h", label_visibility="collapsed")
+                    cs = cc[3].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
+                    carry_quinella_all[cg][(ca, cb)] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cn)}
+        st.markdown("### 2車複｜記号別比較（過去分引継ぎ）")
+        for label in daily_quinella_labels:
+            cc = st.columns([2, 1, 1, 1, 1])
+            cc[0].markdown(label)
+            ck = f"carry_qnamed_{label}"
+            cn = cc[1].number_input("対象R", min_value=0, key=ck+"_n", label_visibility="collapsed")
+            cp = cc[2].number_input("購入点数", min_value=0, key=ck+"_points", label_visibility="collapsed")
+            ch = cc[3].number_input("的中数", min_value=0, key=ck+"_h", label_visibility="collapsed")
+            cs = cc[4].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
+            carry_quinella_named[label] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cp)}
+        st.markdown("### ワイド｜追加検証分（過去分引継ぎ）")
+        for label in ["◎－×", *wide_unmarked_labels]:
+            cc = st.columns([2, 1, 1, 1, 1])
+            cc[0].markdown(label)
+            ck = f"carry_wextra_{label}"
+            cn = cc[1].number_input("対象R", min_value=0, key=ck+"_n", label_visibility="collapsed")
+            cp = cc[2].number_input("購入点数", min_value=0, key=ck+"_points", label_visibility="collapsed")
+            ch = cc[3].number_input("的中数", min_value=0, key=ck+"_h", label_visibility="collapsed")
+            cs = cc[4].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
+            carry_wide_extra[label] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cp)}
+        st.markdown("### 3連複｜全体・記号別（過去分引継ぎ）")
+        c3a,c3b,c3c,c3d = st.columns(4)
+        carry_trio = {"N":int(c3a.number_input("3連複 対象R",min_value=0,key="carry_trio_n")),
+                      "KSUM":int(c3b.number_input("3連複 購入点数",min_value=0,key="carry_trio_points")),
+                      "H":int(c3c.number_input("3連複 的中R",min_value=0,key="carry_trio_h")),
+                      "SUM":int(c3d.number_input("3連複 払戻合計",min_value=0,step=10,key="carry_trio_sum"))}
+        st.caption("記号別の過去集計がある場合は、下欄に『記号,対象R,購入点数,的中数,払戻合計』を1行ずつ入力してください。全体集計とは別に集計します。")
+        carry_trio_symbol_raw = st.text_area("3連複 記号別引継ぎ", key="carry_trio_symbol_raw", height=100, placeholder="◎－無－▲,12,120,2,1800")
         st.form_submit_button("前日までの集計を反映")
 
 
@@ -768,6 +816,35 @@ def set_summary(group, records):
 # ============================================================
 # E. 結果・CSV・本日分・レース別判定
 # ============================================================
+# 累積：既存の日次集計に過去引継ぎを加算（入力済みの過去分を二重に入れないこと）。
+quinella_all_total = {g:{} for g in GROUP_MARKS}
+for g in GROUP_MARKS:
+    for pair in set(quinella_all_records[g]) | set(carry_quinella_all[g]):
+        quinella_all_total[g][pair] = add_records(quinella_all_records[g].get(pair, blank_bet()), carry_quinella_all[g].get(pair, blank_bet()), ("N","H","SUM","KSUM"))
+quinella_named_total = {name:add_records(daily_quinella[name],carry_quinella_named.get(name,blank_bet()),("N","H","SUM","KSUM")) for name in daily_quinella}
+wide_x_total = add_records(daily_wide_x,carry_wide_extra.get("◎－×",blank_bet()),("N","H","SUM","KSUM"))
+wide_unmarked_total = {name:add_records(daily_wide_unmarked[name],carry_wide_extra.get(name,blank_bet()),("N","H","SUM","KSUM")) for name in daily_wide_unmarked}
+trio_total_rec = add_records({"N":trio_stats["対象R"],"KSUM":trio_stats["購入点数"],"H":trio_stats["的中R"],"SUM":trio_total_payout},carry_trio,("N","H","SUM","KSUM"))
+carry_trio_symbols = {}
+for lineno, rawline in enumerate(carry_trio_symbol_raw.splitlines(),1):
+    if not rawline.strip(): continue
+    cells = [x.strip() for x in rawline.replace("，",",").split(",")]
+    if len(cells) != 5:
+        warnings.append(f"3連複記号別引継ぎ {lineno}行目: 5項目必要です")
+        continue
+    try:
+        name = cells[0]
+        n,k,h,pay = map(int,cells[1:])
+        if min(n,k,h,pay)<0: raise ValueError()
+        if name in carry_trio_symbols: raise ValueError()
+        carry_trio_symbols[name] = {"N":n,"KSUM":k,"H":h,"SUM":pay}
+    except ValueError:
+        warnings.append(f"3連複記号別引継ぎ {lineno}行目: 数値または重複記号が不正です")
+trio_symbol_total = {}
+for name in set(trio_symbol_stakes) | set(carry_trio_symbols):
+    prev = carry_trio_symbols.get(name,blank_bet())
+    trio_symbol_total[name] = {"N":trio_symbol_races.get(name,0)+prev["N"],"KSUM":trio_symbol_stakes.get(name,0)+prev["KSUM"],"H":trio_symbol_counts.get(name,0)+prev["H"],"SUM":trio_symbol_payouts.get(name,0)+prev["SUM"]}
+
 with tab_result:
     st.subheader("◎軸とα軸｜累積比較")
     st.caption(
@@ -789,7 +866,7 @@ with tab_result:
 
     st.divider()
     st.divider()
-    st.subheader("◎軸｜3連複 ◎－無・β・ε－全【本日入力分】")
+    st.subheader("◎軸｜3連複 ◎－無・β・ε－全【累積】")
     st.caption("買い目は◎－無・β・ε－全車。集計では各車の通常印（◎○▲△×）を優先し、通常無印は『無』に統一。3列目も実際の記号で表示します。")
     if sum(trio_symbol_stakes.values()) != trio_stats["購入点数"]:
         st.error("3連複の記号別購入点数が全体と一致しません。")
@@ -800,16 +877,16 @@ with tab_result:
     if sum(trio_symbol_payouts.values()) != trio_total_payout:
         st.error("3連複の記号別払戻が全体と一致しません。")
         st.stop()
-    trio_points = trio_stats["購入点数"]
-    trio_races = trio_stats["対象R"]
+    trio_points = trio_total_rec["KSUM"]
+    trio_races = trio_total_rec["N"]
     trio_cost = trio_points * 100
     trio_summary = pd.DataFrame([{
         "対象R": trio_races, "購入点数": trio_points,
-        "的中R": trio_stats["的中R"],
-        "的中率%": pct(trio_stats["的中R"], trio_races),
-        "投資額": trio_cost, "払戻合計": trio_total_payout,
-        "収支": trio_total_payout - trio_cost,
-        "回収率%": pct(trio_total_payout, trio_cost),
+        "的中R": trio_total_rec["H"],
+        "的中率%": pct(trio_total_rec["H"], trio_races),
+        "投資額": trio_cost, "払戻合計": trio_total_rec["SUM"],
+        "収支": trio_total_rec["SUM"] - trio_cost,
+        "回収率%": pct(trio_total_rec["SUM"], trio_cost),
         "払戻未入力の的中R": trio_missing_payouts,
     }])
     show_full_table(style_roi(trio_summary))
@@ -818,17 +895,15 @@ with tab_result:
     st.markdown("**的中した記号の組み合わせ別集計**")
     st.caption("◎－無・β・ε－全の購入券だけを分類。2列目は無→β→εを優先し、3列目は通常印（○▲△×無）を表示。各券は1分類のみ。回収率は記号分類ごとの投資額（点数×100円）で計算。")
     symbol_table = pd.DataFrame([{
-        "記号組合せ": k,
-        "対象R": trio_symbol_races.get(k, 0),
-        "購入点数": n,
-        "投資額": n * 100,
-        "的中数": trio_symbol_counts.get(k, 0),
-        "的中率%（点数比）": pct(trio_symbol_counts.get(k, 0), n),
-        "払戻合計": trio_symbol_payouts.get(k, 0),
-        "収支": trio_symbol_payouts.get(k, 0) - n * 100,
-        "回収率%": pct(trio_symbol_payouts.get(k, 0), n * 100),
-    } for k, n in sorted(trio_symbol_stakes.items(), key=lambda kv: (-trio_symbol_counts.get(kv[0], 0), kv[0]))],
+        "記号組合せ": k, "対象R": rec["N"], "購入点数": rec["KSUM"],
+        "投資額": rec["KSUM"] * 100, "的中数": rec["H"],
+        "的中率%（点数比）": pct(rec["H"], rec["KSUM"]),
+        "払戻合計": rec["SUM"], "収支": rec["SUM"] - rec["KSUM"] * 100,
+        "回収率%": pct(rec["SUM"], rec["KSUM"] * 100)
+    } for k, rec in sorted(trio_symbol_total.items(), key=lambda kv: (-kv[1]["H"], kv[0]))],
         columns=["記号組合せ", "対象R", "購入点数", "投資額", "的中数", "的中率%（点数比）", "払戻合計", "収支", "回収率%"])
+    if carry_trio["KSUM"] and sum(r["KSUM"] for r in carry_trio_symbols.values()) != carry_trio["KSUM"]:
+        st.info("3連複の記号別引継ぎは全体引継ぎと購入点数が一致していません。記号別表は入力された内訳分だけの累積です。")
     show_full_table(style_roi(symbol_table))
     with st.expander("3連複・記号組み合わせのレース別内訳"):
         if trio_symbol_details:
@@ -837,21 +912,21 @@ with tab_result:
         if trio_detail:
             show_full_table(style_roi(pd.DataFrame(trio_detail)))
 
-    st.subheader("◎軸｜2車複 記号別比較【本日入力分】")
-    st.caption("◎－○／▲／△／×／無印／β／εを各100円で個別検証。無印は通常印の付いていない車をすべて含みます。β・εは妙味印を参照。同じ車番が複数の印に該当しても、比較用の各行は独立した購入戦略です。2車複払戻は1レース1組の金額を入力します。過去の引継ぎ分は含みません。")
-    q_df = pd.DataFrame([bet_row(name, daily_quinella[name]) for name in daily_quinella])
+    st.subheader("◎軸｜2車複 記号別比較【累積】")
+    st.caption("◎－○／▲／△／×／無印／β／εを各100円で個別検証。無印は通常印の付いていない車をすべて含みます。β・εは妙味印を参照。同じ車番が複数の印に該当しても、比較用の各行は独立した購入戦略です。2車複払戻は1レース1組の金額を入力します。過去引継ぎ分を含みます。")
+    q_df = pd.DataFrame([bet_row(name, quinella_named_total[name]) for name in daily_quinella])
     show_full_table(style_roi(q_df))
     if quinella_missing_payouts:
         st.warning(f"2車複の的中{quinella_missing_payouts}件（記号別の延べ件数）で払戻が未入力です。回収率は暫定値です。")
 
     st.divider()
-    st.subheader("2車複｜全通り・軸別集計【本日入力分】")
+    st.subheader("2車複｜全通り・軸別集計【累積】")
     st.caption("通常と妙味を独立検証。7車立ては各21組、6車立ては各15組。無印1・2は各評価の未評価車を車番昇順で割り当て。各券100円平買い。軸－全は自分以外の全車を各100円で購入した仮想成績です。")
-    st.caption("個別の的中率は対象レース数に対する割合。軸－全の的中率は1レースにつき1組以上当たった割合（軸の連対率）であり、回収率の分母は全購入点数です。引継ぎ値は含みません。")
+    st.caption("個別の的中率は対象レース数に対する割合。軸－全の的中率は1レースにつき1組以上当たった割合（軸の連対率）であり、回収率の分母は全購入点数です。過去引継ぎ分を含みます。")
     quinella_all_exports = {}
     quinella_axis_exports = {}
     for q_group in GROUP_MARKS:
-        q_records = quinella_all_records[q_group]
+        q_records = quinella_all_total[q_group]
         q_order = quinella_all_order[q_group]
         q_rows = []
         for left, right in combinations(q_order, 2):
@@ -891,13 +966,13 @@ with tab_result:
     show_full_table(style_roi(pd.DataFrame([wide_summary(total_wides)])))
     show_full_table(style_roi(wide_frame(total_wides)))
 
-    st.subheader("◎軸｜ワイド ◎－×【本日入力分】")
-    st.caption("通常評価の◎と×を各レース100円で購入した想定。的中は両車が3着以内。既存のワイド車番・払戻3組を利用します。過去の引継ぎ分は含みません。")
-    show_full_table(style_roi(pd.DataFrame([bet_row("◎－×", daily_wide_x)])))
+    st.subheader("◎軸｜ワイド ◎－×【累積】")
+    st.caption("通常評価の◎と×を各レース100円で購入した想定。的中は両車が3着以内。既存のワイド車番・払戻3組を利用します。過去引継ぎ分を含みます。")
+    show_full_table(style_roi(pd.DataFrame([bet_row("◎－×", wide_x_total)])))
 
-    st.subheader("◎軸｜ワイド 無印・β/ε重複【本日入力分】")
+    st.subheader("◎軸｜ワイド 無印・β/ε重複【累積】")
     st.caption("通常印5車から無印を判定。◎－無印合計は無印1・2を各100円で購入した計算。重複抽出は無印とβまたはεが同じ車番の買い目だけ。過去の引継ぎ集計には無印ワイドの項目がないため、この表は日次入力分のみです。")
-    show_full_table(style_roi(wide_unmarked_frame(daily_wide_unmarked)))
+    show_full_table(style_roi(wide_unmarked_frame(wide_unmarked_total)))
 
     for group in GROUP_MARKS:
         st.divider()
@@ -953,8 +1028,8 @@ with tab_result:
         data=summary_df.to_csv(index=False).encode("utf-8-sig"),
         file_name="velovi_axis_3point_summary.csv", mime="text/csv"
     )
-    st.download_button("2車複 記号別比較 CSV", data=pd.DataFrame([bet_row(name, daily_quinella[name]) for name in daily_quinella]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_quinella_daily.csv", mime="text/csv")
-    st.download_button("ワイド ◎－× CSV", data=pd.DataFrame([bet_row("◎－×", daily_wide_x)]).to_csv(index=False).encode("utf-8-sig"),
+    st.download_button("2車複 記号別比較 CSV", data=pd.DataFrame([bet_row(name, quinella_named_total[name]) for name in daily_quinella]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_quinella_daily.csv", mime="text/csv")
+    st.download_button("ワイド ◎－× CSV", data=pd.DataFrame([bet_row("◎－×", wide_x_total)]).to_csv(index=False).encode("utf-8-sig"),
                        file_name="velovi_wide_x_daily.csv", mime="text/csv")
     st.download_button("ワイド ◎－無印・重複抽出 CSV", data=wide_unmarked_frame(daily_wide_unmarked).to_csv(index=False).encode("utf-8-sig"),
                        file_name="velovi_wide_unmarked_daily.csv", mime="text/csv")
