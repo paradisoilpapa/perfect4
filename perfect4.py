@@ -210,45 +210,79 @@ tab_daily, tab_carry, tab_result = st.tabs(
     ["日次入力", "前日までの集計（引継ぎ）", "集計結果"]
 )
 
+# 100Rの入力欄を50Rずつ描画する。ページ間の値はウィジェットとは別に保持。
+import json
+
+def _empty_race(i):
+    return {"race": str(i), "normal": "", "alpha": "", "finish": "",
+            "pay": 0, "quinella_pay": 0,
+            "wide_entries": [["", 0] for _ in range(3)],
+            "field_size": 7, "exclude": False}
+
+if "velovi_saved_daily_50" not in st.session_state:
+    _prior = [_empty_race(i) for i in range(1, 101)]
+    # 旧100R画面から同じStreamlitセッションで切替えた場合、旧キーを引き継ぐ。
+    for _i in range(1, 101):
+        _r = _prior[_i - 1]
+        for _field, _prefix in (("race", "rid"), ("normal", "mark"), ("alpha", "alpha_mark"), ("finish", "fin"), ("pay", "pay2t"), ("quinella_pay", "pay2f"), ("field_size", "field_size"), ("exclude", "exclude")):
+            _r[_field] = st.session_state.get(f"{_prefix}_{_i}", _r[_field])
+        for _j in range(1, 4):
+            _r["wide_entries"][_j-1] = [st.session_state.get(f"wide_pair{_j}_{_i}", ""), st.session_state.get(f"wide_pay{_j}_{_i}", 0)]
+    st.session_state["velovi_saved_daily_50"] = _prior
+
 with tab_daily:
-    st.caption(
-        "通常印順：◎○▲△（×任意）、妙味印順：αβγε（Ω任意）。"
-        "印は各グループ4～5車を入力。片方だけの入力も可。"
-        "着順は3着まで。2車単払戻は100円あたりの金額です。"
-        "落車・失格等は集計除外にチェックしてください。"
-        "車数は7車が初期値です。6車立ては6に変更してください。"
-    )
-    st.caption("ワイドは最大3組。車番と払戻金を別枠で入力します（例：車番 1-2、払戻 350円）。")
-    with st.form("daily_input_form"):
-        daily_rows = []
-        for i in range(1, 101):
+    st.caption("100Rの枠はそのまま、50Rずつ表示します。切り替える前に『この50Rを反映』を押してください。")
+    page = st.radio("入力範囲", [0, 1], format_func=lambda p: "1～50R" if p == 0 else "51～100R", horizontal=True, key="velovi_50_page")
+    start, end = page * 50, (page + 1) * 50
+    page_rows = []
+    with st.form(f"daily_input_form_50_{page}"):
+        for i in range(start + 1, end + 1):
+            old = st.session_state["velovi_saved_daily_50"][i-1]
             st.markdown(f"**{i}R**")
             c1, c2, c3 = st.columns([1.0, 2.0, 2.0])
-            rid = c1.text_input("R番号", value=str(i), key=f"rid_{i}")
-            normal = c2.text_input("通常印順 ◎○▲△×", value="", key=f"mark_{i}")
-            alpha = c3.text_input("妙味印順 αβγεΩ", value="", key=f"alpha_mark_{i}")
+            rid = c1.text_input("R番号", value=str(old["race"]), key=f"p{page}_rid_{i}")
+            normal = c2.text_input("通常印順 ◎○▲△×", value=str(old["normal"]), key=f"p{page}_mark_{i}")
+            alpha = c3.text_input("妙味印順 αβγεΩ", value=str(old["alpha"]), key=f"p{page}_alpha_{i}")
             c4, c5, c6, c7 = st.columns([1.6, 1.5, 1.0, 0.9])
-            finish = c4.text_input("着順（3着まで）", value="", key=f"fin_{i}")
-            pay = c5.number_input("2車単払戻", min_value=0, value=0, step=10,
-                                  key=f"pay2t_{i}")
-            trio_pay = c5.number_input("3連複払戻（100円）", min_value=0, value=0, step=10, key=f"pay3f_{i}")
-            quinella_pay = c5.number_input("2車複払戻（100円）", min_value=0, value=0, step=10, key=f"pay2f_{i}")
+            finish = c4.text_input("着順（3着まで）", value=str(old["finish"]), key=f"p{page}_fin_{i}")
+            pay = c5.number_input("2車単払戻", min_value=0, value=int(old["pay"]), step=10, key=f"p{page}_pay2t_{i}")
+            quinella_pay = c5.number_input("2車複払戻（100円）", min_value=0, value=int(old["quinella_pay"]), step=10, key=f"p{page}_pay2f_{i}")
             st.caption("ワイド的中組（車番・払戻を別入力）")
             wide_entries = []
             for j in range(1, 4):
-                wc, wp = st.columns([1.0, 1.0])
-                pair = wc.text_input(f"ワイド{j} 車番", key=f"wide_pair{j}_{i}", placeholder="例 12")
-                money = wp.number_input(f"ワイド{j} 払戻（円）", min_value=0, value=0, step=10, key=f"wide_pay{j}_{i}")
-                wide_entries.append((pair, int(money)))
-            field_size = c6.selectbox("車数", options=[7, 6], key=f"field_size_{i}")
-            exclude = c7.checkbox("集計除外", value=False, key=f"exclude_{i}")
-            daily_rows.append({
-                "race": rid, "normal": normal, "alpha": alpha,
-                "finish": finish, "pay": int(pay), "trio_pay": int(trio_pay), "quinella_pay": int(quinella_pay), "wide_entries": wide_entries,
-                "field_size": int(field_size), "exclude": bool(exclude)
-            })
+                wc, wp = st.columns([1, 1])
+                old_pair, old_money = old["wide_entries"][j-1]
+                pair = wc.text_input(f"ワイド{j} 車番", value=str(old_pair), key=f"p{page}_wide_pair{j}_{i}", placeholder="例 12")
+                money = wp.number_input(f"ワイド{j} 払戻（円）", min_value=0, value=int(old_money), step=10, key=f"p{page}_wide_pay{j}_{i}")
+                wide_entries.append([pair, int(money)])
+            field_size = c6.selectbox("車数", [7, 6], index=0 if int(old["field_size"]) == 7 else 1, key=f"p{page}_field_size_{i}")
+            exclude = c7.checkbox("集計除外", value=bool(old["exclude"]), key=f"p{page}_exclude_{i}")
+            page_rows.append({"race": rid, "normal": normal, "alpha": alpha,
+                "finish": finish, "pay": int(pay),
+                "quinella_pay": int(quinella_pay), "wide_entries": wide_entries,
+                "field_size": int(field_size), "exclude": bool(exclude)})
             st.divider()
-        st.form_submit_button("日次入力を反映")
+        submitted_50 = st.form_submit_button("この50Rを反映")
+    if submitted_50:
+        st.session_state["velovi_saved_daily_50"][start:end] = page_rows
+        st.success(f"{start+1}～{end}Rを反映しました。")
+    daily_rows = st.session_state["velovi_saved_daily_50"]
+    st.download_button("入力内容をバックアップ（JSON）", data=json.dumps({"daily_rows": daily_rows}, ensure_ascii=False).encode("utf-8"), file_name="velovi_input_backup.json", mime="application/json")
+    upload = st.file_uploader("入力バックアップを復元（JSON）", type=["json"], key="velovi_restore_50")
+    if st.button("バックアップを復元", disabled=upload is None):
+        try:
+            payload = json.loads(upload.getvalue().decode("utf-8"))
+            rows = payload["daily_rows"]
+            if not isinstance(rows, list) or len(rows) != 100:
+                raise ValueError("100R分のデータではありません")
+            st.session_state["velovi_saved_daily_50"] = [{**_empty_race(i), **r} for i, r in enumerate(rows, 1)]
+            # 既存ウィジェットキーを破棄し、復元データから入力欄を再生成する。
+            for key in list(st.session_state.keys()):
+                if key.startswith(("p0_", "p1_")):
+                    del st.session_state[key]
+            st.rerun()
+        except (ValueError, KeyError, TypeError, UnicodeError) as exc:
+            st.error(f"復元できません: {exc}")
 
 
 # ============================================================
@@ -264,8 +298,6 @@ wide_unmarked_labels = ("◎－無印1", "◎－無印2", "◎－無印合計", 
 carry_quinella_all = {g:{} for g in GROUP_MARKS}
 carry_quinella_named = {}
 carry_wide_extra = {}
-carry_trio = {"N":0,"KSUM":0,"H":0,"SUM":0}
-carry_trio_symbol_raw = ""
 
 with tab_carry:
     st.subheader("前日までの集計（累積・引継ぎ）")
@@ -388,15 +420,6 @@ with tab_carry:
             ch = cc[3].number_input("的中数", min_value=0, key=ck+"_h", label_visibility="collapsed")
             cs = cc[4].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
             carry_wide_extra[label] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cp)}
-        st.markdown("### 3連複｜全体・記号別（過去分引継ぎ）")
-        st.caption("対象R＝対象となったレース数、購入点数＝全レースの実際の候補点数の合計、的中R＝的中したレース数、払戻合計＝100円当たり払戻の合計。例：10Rで各3点なら購入点数30。過去の3連複データがなければすべて0です。")
-        c3a,c3b,c3c,c3d = st.columns(4)
-        carry_trio = {"N":int(c3a.number_input("3連複 対象R",min_value=0,key="carry_trio_n")),
-                      "KSUM":int(c3b.number_input("3連複 購入点数",min_value=0,key="carry_trio_points")),
-                      "H":int(c3c.number_input("3連複 的中R",min_value=0,key="carry_trio_h")),
-                      "SUM":int(c3d.number_input("3連複 払戻合計",min_value=0,step=10,key="carry_trio_sum"))}
-        st.caption("記号別の過去集計がある場合は、下欄に『記号,対象R,購入点数,的中数,払戻合計』を1行ずつ入力してください。全体集計とは別に集計します。")
-        carry_trio_symbol_raw = st.text_area("3連複 記号別引継ぎ", key="carry_trio_symbol_raw", height=100, placeholder="◎－無－▲,12,36,2,1800")
         st.form_submit_button("前日までの集計を反映")
 
 
@@ -420,17 +443,6 @@ quinella_all_missing = {g: 0 for g in GROUP_MARKS}
 quinella_all_order = {g: list(GROUP_MARKS[g]) + ["無印1", "無印2"] for g in GROUP_MARKS}
 wide_unmarked_names = ("◎－無印1", "◎－無印2", "◎－無印合計", "◎－無印∩β/ε")
 daily_wide_unmarked = {name: blank_bet() for name in wide_unmarked_names}
-# 3連複：◎軸、相手は通常無印1・2と妙味β・ε（重複車番は1車扱い）。
-trio_stats = {"対象R": 0, "購入点数": 0, "的中数": 0, "的中R": 0}
-trio_detail = []
-trio_symbol_counts = {}
-trio_symbol_stakes = {}
-trio_symbol_races = {}
-trio_normal_counts = {}
-trio_symbol_payouts = {}
-trio_missing_payouts = 0
-trio_total_payout = 0
-trio_symbol_details = []
 valid_races = {g: 0 for g in GROUP_MARKS}
 excluded_races = 0
 warnings: List[str] = []
@@ -442,13 +454,12 @@ for entry in daily_rows:
     raw_alpha = str(entry["alpha"]).strip()
     raw_finish = str(entry["finish"]).strip()
     payout = int(entry["pay"])
-    trio_pay = int(entry.get("trio_pay", 0))
     quinella_pay = int(entry.get("quinella_pay", 0))
     wide_entries = entry["wide_entries"]
     field_size = int(entry["field_size"])
     exclude = bool(entry["exclude"])
 
-    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, trio_pay > 0, quinella_pay > 0, any(str(pair).strip() or money > 0 for pair, money in wide_entries), exclude]):
+    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, quinella_pay > 0, any(str(pair).strip() or money > 0 for pair, money in wide_entries), exclude]):
         continue
 
     if exclude:
@@ -532,84 +543,6 @@ for entry in daily_rows:
             else:
                 warnings.append(f"R{rid}: 車数と車番が一致しないため◎→×無無を集計しません。")
                 detail["◎→×無無"] = "車数不一致・対象外"
-    # 3連複は配当未入力でも着順3車だけで判定。◎固定・残り2車の組合せ。
-    trio_normal = parse_markline(raw_normal, "通常") if raw_normal else {}
-    trio_value = parse_markline(raw_alpha, "妙味") if raw_alpha else {}
-    if (len(trio_normal) == 5 and len(trio_value) >= 4
-            and all(1 <= int(v) <= field_size for v in trio_normal.values())
-            and all(1 <= int(v) <= field_size for v in trio_value.values())
-            and all(1 <= int(v) <= field_size for v in finish[:3])):
-        trio_unmarked = sorted(set(str(v) for v in range(1, field_size + 1)) - set(trio_normal.values()), key=int)
-        if len(trio_unmarked) == field_size - 5:
-            trio_axis = trio_normal["◎"]
-            trio_others = sorted(({*trio_unmarked, trio_value.get("β"), trio_value.get("ε")} - {None, trio_axis}), key=int)
-            trio_tickets = [frozenset((trio_axis, a, b)) for a, b in combinations(
-                (str(v) for v in range(1, field_size + 1) if str(v) != trio_axis), 2
-            ) if a in trio_others or b in trio_others]
-            trio_hit = frozenset(finish[:3]) in trio_tickets
-            # 2列目の資格（無・β・ε）と3列目の通常印を混同しない。
-            # 2列目の車番を先に確定し、3列目は残りの車番を通常印で表示する。
-            # 2列目に複数の該当車があるときは 無 > β > ε の優先順で一意に分類。
-            # ◎－○－▲ のように2列目条件を満たさないラベルは生成しない。
-            normal_by_car = {car: mark for mark, car in trio_normal.items()}
-            candidate_by_car = {}
-            for car in trio_unmarked:
-                if car != trio_axis:
-                    candidate_by_car[car] = "無"
-            for candidate_mark in ("β", "ε"):
-                car = trio_value.get(candidate_mark)
-                if car and car != trio_axis and car not in candidate_by_car:
-                    candidate_by_car[car] = candidate_mark
-
-            def third_tag(car):
-                return normal_by_car.get(car, "無")
-
-            hit_ticket = frozenset(finish[:3]) if trio_hit else None
-            hit_label = ""
-            race_labels = set()
-            race_ticket_labels = []
-            for ticket in trio_tickets:
-                others = ticket - {trio_axis}
-                eligible = [(car, candidate_by_car[car]) for car in others if car in candidate_by_car]
-                if not eligible:
-                    raise AssertionError(f"R{rid}: 2列目候補を含まない買い目 {ticket}")
-                # 同じ買い目を複数分類しない。無・β・ε の順に代表の2列目を選ぶ。
-                candidate_car, candidate_mark = min(eligible, key=lambda t: ({"無": 0, "β": 1, "ε": 2}[t[1]], int(t[0])))
-                third_car = next(iter(others - {candidate_car}))
-                label = f"◎－{candidate_mark}－{third_tag(third_car)}"
-                race_labels.add(label)
-                race_ticket_labels.append(label)
-                trio_symbol_stakes[label] = trio_symbol_stakes.get(label, 0) + 1
-                if ticket == hit_ticket:
-                    hit_label = label
-                    trio_symbol_counts[label] = trio_symbol_counts.get(label, 0) + 1
-                    trio_symbol_payouts[label] = trio_symbol_payouts.get(label, 0) + trio_pay
-            # 各購入券がちょうど1つの記号分類に入っていることを検算。
-            if len(race_ticket_labels) != len(trio_tickets):
-                raise AssertionError(f"R{rid}: 3連複の記号別購入点数が一致しません")
-            if trio_hit and not hit_label:
-                raise AssertionError(f"R{rid}: 的中買い目の記号分類がありません")
-            for label in race_labels:
-                trio_symbol_races[label] = trio_symbol_races.get(label, 0) + 1
-            if trio_hit:
-                trio_total_payout += trio_pay
-                if trio_pay == 0:
-                    trio_missing_payouts += 1
-                trio_symbol_details.append({"R": rid, "着順": "-".join(finish[:3]),
-                                            "記号組合せ": hit_label,
-                                            "3連複払戻": trio_pay})
-            trio_stats["対象R"] += 1
-            trio_stats["購入点数"] += len(trio_tickets)
-            trio_stats["的中数"] += int(trio_hit)
-            trio_stats["的中R"] += int(trio_hit)
-            trio_detail.append({"R": rid, "◎": trio_axis, "相手候補": "・".join(trio_others),
-                                "購入点数": len(trio_tickets), "着順": "-".join(finish[:3]),
-                                "的中": "○" if trio_hit else "×", "3連複払戻": trio_pay if trio_hit else 0})
-            detail["3連複 ◎－無無βε－全"] = "的中" if trio_hit else "外れ"
-        else:
-            detail["3連複 ◎－無無βε－全"] = "車数不一致・対象外"
-    else:
-        detail["3連複 ◎－無無βε－全"] = "印不足・対象外"
     # 2車複・全通り：各評価の5印＋無印1・2で全21通り（6車なら15通り）。
     # 無印1・2は、その評価で印のない車番を小さい順に割り当てる。
     # 同一レースで各評価は別集計。的中は1組のみで、払戻は2車複入力を使う。
@@ -884,52 +817,6 @@ with tab_result:
 
     st.divider()
     st.divider()
-    st.subheader("◎軸｜3連複 ◎－無・β・ε－全【累積】")
-    st.caption("買い目は◎－無・β・ε－全車。集計では各車の通常印（◎○▲△×）を優先し、通常無印は『無』に統一。3列目も実際の記号で表示します。")
-    if sum(trio_symbol_stakes.values()) != trio_stats["購入点数"]:
-        st.error("3連複の記号別購入点数が全体と一致しません。")
-        st.stop()
-    if sum(trio_symbol_counts.values()) != trio_stats["的中数"]:
-        st.error("3連複の記号別的中数が全体と一致しません。")
-        st.stop()
-    if sum(trio_symbol_payouts.values()) != trio_total_payout:
-        st.error("3連複の記号別払戻が全体と一致しません。")
-        st.stop()
-    trio_points = trio_total_rec["KSUM"]
-    trio_races = trio_total_rec["N"]
-    trio_cost = trio_points * 100
-    trio_summary = pd.DataFrame([{
-        "対象R": trio_races, "購入点数": trio_points,
-        "的中R": trio_total_rec["H"],
-        "的中率%": pct(trio_total_rec["H"], trio_races),
-        "投資額": trio_cost, "払戻合計": trio_total_rec["SUM"],
-        "収支": trio_total_rec["SUM"] - trio_cost,
-        "回収率%": pct(trio_total_rec["SUM"], trio_cost),
-        "払戻未入力の的中R": trio_missing_payouts,
-    }])
-    show_full_table(style_roi(trio_summary))
-    if trio_missing_payouts:
-        st.warning(f"3連複の的中{trio_missing_payouts}Rで払戻が未入力です。回収率は暫定値です。")
-    st.markdown("**的中した記号の組み合わせ別集計**")
-    st.caption("◎－無・β・ε－全の購入券だけを分類。2列目は無→β→εを優先し、3列目は通常印（○▲△×無）を表示。各券は1分類のみ。回収率は記号分類ごとの投資額（点数×100円）で計算。")
-    symbol_table = pd.DataFrame([{
-        "記号組合せ": k, "対象R": rec["N"], "購入点数": rec["KSUM"],
-        "投資額": rec["KSUM"] * 100, "的中数": rec["H"],
-        "的中率%（点数比）": pct(rec["H"], rec["KSUM"]),
-        "払戻合計": rec["SUM"], "収支": rec["SUM"] - rec["KSUM"] * 100,
-        "回収率%": pct(rec["SUM"], rec["KSUM"] * 100)
-    } for k, rec in sorted(trio_symbol_total.items(), key=lambda kv: (-kv[1]["H"], kv[0]))],
-        columns=["記号組合せ", "対象R", "購入点数", "投資額", "的中数", "的中率%（点数比）", "払戻合計", "収支", "回収率%"])
-    if carry_trio["KSUM"] and sum(r["KSUM"] for r in carry_trio_symbols.values()) != carry_trio["KSUM"]:
-        st.info("3連複の記号別引継ぎは全体引継ぎと購入点数が一致していません。記号別表は入力された内訳分だけの累積です。")
-    show_full_table(style_roi(symbol_table))
-    with st.expander("3連複・記号組み合わせのレース別内訳"):
-        if trio_symbol_details:
-            show_full_table(style_roi(pd.DataFrame(trio_symbol_details)))
-    with st.expander("3連複のレース別判定を見る"):
-        if trio_detail:
-            show_full_table(style_roi(pd.DataFrame(trio_detail)))
-
     st.subheader("◎軸｜2車複 記号別比較【累積】")
     st.caption("◎－○／▲／△／×／無印／β／εを各100円で個別検証。無印は通常印の付いていない車をすべて含みます。β・εは妙味印を参照。同じ車番が複数の印に該当しても、比較用の各行は独立した購入戦略です。2車複払戻は1レース1組の金額を入力します。過去引継ぎ分を含みます。")
     q_df = pd.DataFrame([bet_row(name, quinella_named_total[name]) for name in daily_quinella])
@@ -1034,8 +921,6 @@ with tab_result:
 
     st.divider()
     st.subheader("CSVダウンロード")
-    st.download_button("3連複 記号組合せCSV", data=symbol_table.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_overlap_symbols.csv", mime="text/csv")
-    st.download_button("3連複 ◎－無無βε－全 レース別CSV", data=pd.DataFrame(trio_detail, columns=["R", "◎", "相手候補", "購入点数", "着順", "的中", "3連複払戻"]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_unmarked_beta_epsilon.csv", mime="text/csv")
     st.download_button(
         "◎→×・無印・無印 CSV",
         data=unmarked_frame(total_unmarked).to_csv(index=False).encode("utf-8-sig"),
