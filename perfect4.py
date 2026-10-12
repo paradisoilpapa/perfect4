@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""ヴェロビ集計｜◎軸ワイドβ・ε検証版。
+"""ヴェロビ集計｜通常◎・妙味α 集計版。
 
 元の618行版を基準とした仕様:
 - 通常 ◎○▲△× / 妙味 αβγεΩ の印着内率
 - 2車単は各軸の表裏8通りだけ（通常◎、妙味α）
 - 通常◎→○▲△ / 妙味α→γβε の3点セット集計
-- ワイド ◎-β/ε を集計（最大2点）
 - 旧通常評価の入力キー・引継ぎキーを維持
 - 日次100レース、除外、CSV、日次・累積レース別確認
 """
@@ -17,7 +16,7 @@ import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ集計｜◎・α比較", layout="wide")
 st.title("ヴェロビ集計｜通常◎・妙味α 比較")
-st.caption("通常評価と妙味軸評価を独立集計。◎→×・無印2車も比較。ワイド◎－β／εを検証。各買い目100円平買い換算。")
+st.caption("通常評価と妙味軸評価を独立集計。◎→×・無印2車も比較。各買い目100円平買い換算。")
 
 GROUP_MARKS = {
     "通常": ("◎", "○", "▲", "△", "×"),
@@ -25,7 +24,6 @@ GROUP_MARKS = {
 }
 SET_TARGETS = {"通常": ("○", "▲", "△"), "妙味": ("γ", "β", "ε")}
 GROUP_AXES = {g: marks[0] for g, marks in GROUP_MARKS.items()}
-WIDE_TARGETS = ("β", "ε")
 
 
 def all_axis_pairs(marks: Tuple[str, ...]) -> List[Tuple[str, str]]:
@@ -38,37 +36,6 @@ def all_axis_pairs(marks: Tuple[str, ...]) -> List[Tuple[str, str]]:
 
 
 BET_PAIRS = {g: all_axis_pairs(marks) for g, marks in GROUP_MARKS.items()}
-
-
-def parse_wide_payouts(entries, finish, rid, warnings):
-    """ワイド的中組の車番と100円払戻を別枠から照合する。"""
-    result = {}
-    allowed = {frozenset(pair) for pair in ((finish[0], finish[1]), (finish[0], finish[2]), (finish[1], finish[2]))}
-    for idx, (raw_pair, raw_money) in enumerate(entries, 1):
-        raw_pair = str(raw_pair or "").strip()
-        amount = int(raw_money or 0)
-        if not raw_pair and amount == 0:
-            continue
-        if not raw_pair:
-            warnings.append(f"R{rid}: ワイド{idx}の車番が未入力です。")
-            continue
-        m = re.fullmatch(r"\s*([1-9])\s*[-－ー=：:,/]?\s*([1-9])\s*", raw_pair)
-        if not m:
-            warnings.append(f"R{rid}: ワイド{idx}の車番は『1-2』または『12』で入力してください。")
-            continue
-        a, b = m.groups()
-        pair = frozenset((a, b))
-        if len(pair) != 2 or pair not in allowed:
-            warnings.append(f"R{rid}: ワイド{idx}の{a}-{b}は着順上位3車の組み合わせではありません。")
-            continue
-        if pair in result:
-            warnings.append(f"R{rid}: ワイド{idx}の{a}-{b}は重複入力です。")
-            continue
-        if amount <= 0:
-            warnings.append(f"R{rid}: ワイド{idx}の{a}-{b}の払戻金を入力してください。")
-            continue
-        result[pair] = amount
-    return result
 
 
 def blank_bet():
@@ -247,19 +214,11 @@ with tab_daily:
             finish = c4.text_input("着順（3着まで）", value=str(old["finish"]), key=f"p{page}_fin_{i}")
             pay = c5.number_input("2車単払戻", min_value=0, value=int(old["pay"]), step=10, key=f"p{page}_pay2t_{i}")
             quinella_pay = c5.number_input("2車複払戻（100円）", min_value=0, value=int(old["quinella_pay"]), step=10, key=f"p{page}_pay2f_{i}")
-            st.caption("ワイド的中組（車番・払戻を別入力）")
-            wide_entries = []
-            for j in range(1, 4):
-                wc, wp = st.columns([1, 1])
-                old_pair, old_money = old["wide_entries"][j-1]
-                pair = wc.text_input(f"ワイド{j} 車番", value=str(old_pair), key=f"p{page}_wide_pair{j}_{i}", placeholder="例 12")
-                money = wp.number_input(f"ワイド{j} 払戻（円）", min_value=0, value=int(old_money), step=10, key=f"p{page}_wide_pay{j}_{i}")
-                wide_entries.append([pair, int(money)])
             field_size = c6.selectbox("車数", [7, 6], index=0 if int(old["field_size"]) == 7 else 1, key=f"p{page}_field_size_{i}")
             exclude = c7.checkbox("集計除外", value=bool(old["exclude"]), key=f"p{page}_exclude_{i}")
             page_rows.append({"race": rid, "normal": normal, "alpha": alpha,
                 "finish": finish, "pay": int(pay),
-                "quinella_pay": int(quinella_pay), "wide_entries": wide_entries,
+                "quinella_pay": int(quinella_pay), "wide_entries": old.get("wide_entries", [["", 0] for _ in range(3)]),
                 "field_size": int(field_size), "exclude": bool(exclude)})
             st.divider()
         submitted_50 = st.form_submit_button("この50Rを反映")
@@ -291,13 +250,10 @@ with tab_daily:
 carry_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 carry_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
 carry_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
-carry_wides = {mark: blank_bet() for mark in WIDE_TARGETS}
 
 daily_quinella_labels = ('◎－○', '◎－▲', '◎－△', '◎－×', '◎－無印合計', '◎－β', '◎－ε')
-wide_unmarked_labels = ("◎－無印1", "◎－無印2", "◎－無印合計", "◎－無印∩β/ε")
 carry_quinella_all = {g:{} for g in GROUP_MARKS}
 carry_quinella_named = {}
-carry_wide_extra = {}
 
 # 保存・復元はセッション外でも使える明示的なJSONバックアップで行う。
 # Streamlit Cloudではローカルファイルの永続性を保証できないため、
@@ -433,18 +389,6 @@ with tab_carry:
             carry_unmarked[label] = {"N": int(n), "H": int(h), "SUM": int(summ), "KSUM": int(n)}
             if h > n:
                 st.warning(f"{label}: 的中Hが対象Nを超えています。")
-        st.markdown("### ワイド ◎－β／ε（引継ぎ）")
-        st.caption("以前のワイド集計がある場合だけ入力してください。なければ0のまま、新規分から集計します。")
-        for mark in WIDE_TARGETS:
-            a, b, c, d = st.columns([2.4, 1.0, 1.3, 1.3])
-            a.markdown(f"**◎－{mark}**")
-            prefix = f"wide_carry_{mark}"
-            n = b.number_input("対象N", min_value=0, step=1, key=f"{prefix}_n", label_visibility="collapsed")
-            h = c.number_input("的中H", min_value=0, step=1, key=f"{prefix}_h", label_visibility="collapsed")
-            summ = d.number_input("払戻合計", min_value=0, step=10, key=f"{prefix}_sum", label_visibility="collapsed")
-            carry_wides[mark] = {"N": int(n), "H": int(h), "SUM": int(summ), "KSUM": int(n)}
-            if h > n:
-                st.warning(f"ワイド ◎－{mark}: 的中Hが対象Nを超えています。")
         st.markdown("### 2車複｜全組み合わせ（過去分引継ぎ）")
         st.caption("列は左から【組み合わせ｜対象R｜的中数｜払戻合計（円）】。通常と妙味を別々に入力。7車立ての各組は1R1点なので購入点数＝対象Rです。例：◎－▲なら 44｜7｜1920。")
         for cg in GROUP_MARKS:
@@ -468,17 +412,6 @@ with tab_carry:
             ch = cc[3].number_input("的中数", min_value=0, key=ck+"_h", label_visibility="collapsed")
             cs = cc[4].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
             carry_quinella_named[label] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cp)}
-        st.markdown("### ワイド｜追加検証分（過去分引継ぎ）")
-        st.caption("列は【買い目｜対象R｜購入点数｜的中数｜払戻合計（円）】。ワイドは2車複と払戻金が違います。以前のワイド集計がなければ0のままにしてください。")
-        for label in ["◎－×", *wide_unmarked_labels]:
-            cc = st.columns([2, 1, 1, 1, 1])
-            cc[0].markdown(label)
-            ck = f"carry_wextra_{label}"
-            cn = cc[1].number_input("対象R", min_value=0, key=ck+"_n", label_visibility="collapsed")
-            cp = cc[2].number_input("購入点数", min_value=0, key=ck+"_points", label_visibility="collapsed")
-            ch = cc[3].number_input("的中数", min_value=0, key=ck+"_h", label_visibility="collapsed")
-            cs = cc[4].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
-            carry_wide_extra[label] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cp)}
         st.form_submit_button("前日までの集計を反映")
     st.download_button(
         "日次＋引継ぎをまとめてバックアップ（JSON）",
@@ -486,7 +419,7 @@ with tab_carry:
         file_name="velovi_complete_backup.json", mime="application/json",
         key="velovi_complete_backup_download",
     )
-    st.caption("バックアップには日次100Rと印着内率、2車単、2車複、ワイドの全引継ぎ入力値を含みます。引継ぎ値の変更後は再度ダウンロードしてください。")
+    st.caption("バックアップには日次100Rと印着内率、2車単、2車複の引継ぎ入力値を含みます。引継ぎ値の変更後は再度ダウンロードしてください。")
 
 
 # ============================================================
@@ -495,10 +428,6 @@ with tab_carry:
 daily_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 daily_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
 daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
-daily_wides = {mark: blank_bet() for mark in WIDE_TARGETS}
-# ◎－×：通常評価の×を相手とするワイド。既存の払戻入力を再利用。
-daily_wide_x = blank_bet()
-# 2車複：◎－無印（全無印車）、◎－×。日次入力のみ。
 daily_quinella = {name: blank_bet() for name in ('◎－○', '◎－▲', '◎－△', '◎－×', '◎－無印合計', '◎－β', '◎－ε')}
 quinella_missing_payouts = 0
 # 全2車複：通常／妙味それぞれの5印＋残り無印を全組み合わせで検証。
@@ -507,8 +436,6 @@ quinella_all_records = {g: {} for g in GROUP_MARKS}
 quinella_all_races = {g: 0 for g in GROUP_MARKS}
 quinella_all_missing = {g: 0 for g in GROUP_MARKS}
 quinella_all_order = {g: list(GROUP_MARKS[g]) + ["無印1", "無印2"] for g in GROUP_MARKS}
-wide_unmarked_names = ("◎－無印1", "◎－無印2", "◎－無印合計", "◎－無印∩β/ε")
-daily_wide_unmarked = {name: blank_bet() for name in wide_unmarked_names}
 valid_races = {g: 0 for g in GROUP_MARKS}
 excluded_races = 0
 warnings: List[str] = []
@@ -521,18 +448,17 @@ for entry in daily_rows:
     raw_finish = str(entry["finish"]).strip()
     payout = int(entry["pay"])
     quinella_pay = int(entry.get("quinella_pay", 0))
-    wide_entries = entry["wide_entries"]
     field_size = int(entry["field_size"])
     exclude = bool(entry["exclude"])
 
-    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, quinella_pay > 0, any(str(pair).strip() or money > 0 for pair, money in wide_entries), exclude]):
+    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, quinella_pay > 0, exclude]):
         continue
 
     if exclude:
         excluded_races += 1
         race_details.append({
             "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
-            "着順": raw_finish, "2車単払戻": payout, "ワイド的中組": " / ".join(f"{pair}:{money}" for pair, money in wide_entries if pair or money),
+            "着順": raw_finish, "2車単払戻": payout,
             "集計除外": "除外", "通常的中": "集計除外", "妙味的中": "集計除外"
         })
         continue
@@ -544,7 +470,7 @@ for entry in daily_rows:
 
     detail = {
         "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
-        "着順": "-".join(finish[:3]), "2車単払戻": payout, "ワイド的中組": " / ".join(f"{pair}:{money}" for pair, money in wide_entries if pair or money),
+        "着順": "-".join(finish[:3]), "2車単払戻": payout,
         "集計除外": "", "◎→×無無": "未集計"
     }
     for group, raw in (("通常", raw_normal), ("妙味", raw_alpha)):
@@ -670,70 +596,6 @@ for entry in daily_rows:
     else:
         for q_label in daily_quinella:
             detail[f"2車複 {q_label}"] = "印不足・対象外"
-    wide_payout_map = parse_wide_payouts(wide_entries, finish, rid, warnings)
-    # ◎－× ワイド：有効な通常印が揃ったレースのみ1点購入。
-    x_marks = parse_markline(raw_normal, "通常") if raw_normal else {}
-    if len(x_marks) == 5 and all(1 <= int(v) <= field_size for v in x_marks.values()):
-        x_axis, x_car = x_marks["◎"], x_marks["×"]
-        if x_axis != x_car:
-            daily_wide_x["N"] += 1
-            daily_wide_x["KSUM"] += 1
-            x_hit = x_axis in finish[:3] and x_car in finish[:3]
-            if x_hit:
-                daily_wide_x["H"] += 1
-                x_pair = frozenset((x_axis, x_car))
-                if x_pair in wide_payout_map:
-                    daily_wide_x["SUM"] += wide_payout_map[x_pair]
-                else:
-                    warnings.append(f"R{rid}: ワイド◎－×的中（{x_axis}-{x_car}）ですが払戻が未入力です。")
-            detail["ワイド ◎－×"] = "的中" if x_hit else "外れ"
-        else:
-            detail["ワイド ◎－×"] = "不成立"
-    else:
-        detail["ワイド ◎－×"] = "印不足・対象外"
-    # 無印は通常印5車が揃う場合のみ特定できる。◎－無印は1車ごとに100円。
-    # ◎－無印∩β/εは無印車番とβまたはεが一致する場合のみ購入。
-    um_marks = parse_markline(raw_normal, "通常") if raw_normal else {}
-    value_marks = parse_markline(raw_alpha, "妙味") if raw_alpha else {}
-    if len(um_marks) == 5 and all(1 <= int(v) <= field_size for v in um_marks.values()):
-        um_cars = sorted(set(str(v) for v in range(1, field_size + 1)) - set(um_marks.values()), key=int)
-        if len(um_cars) == field_size - 5:
-            overlap = set(um_cars) & {value_marks.get("β"), value_marks.get("ε")}
-            for idx, car in enumerate(um_cars, 1):
-                for name in (f"◎－無印{idx}", "◎－無印合計") + (("◎－無印∩β/ε",) if car in overlap else ()):
-                    rec = daily_wide_unmarked[name]
-                    rec["N"] += 1
-                    rec["KSUM"] += 1
-                    if um_marks["◎"] in finish[:3] and car in finish[:3]:
-                        rec["H"] += 1
-                        pair_key = frozenset((um_marks["◎"], car))
-                        if pair_key in wide_payout_map:
-                            rec["SUM"] += wide_payout_map[pair_key]
-                        else:
-                            warnings.append(f"R{rid}: ワイド{name}的中（{um_marks['◎']}-{car}）ですが払戻が未入力です。")
-
-    nm = parse_markline(raw_normal, "通常") if raw_normal else {}
-    am = parse_markline(raw_alpha, "妙味") if raw_alpha else {}
-    # ワイドは着順上位3車に◎とβ/εが両方入れば的中（順不同）。
-    # 同一車番や印不足は不成立として購入点数に含めない。
-    for target in WIDE_TARGETS:
-        label = f"ワイド ◎－{target}"
-        cars = [nm.get("◎"), am.get(target)]
-        if any(c is None for c in cars) or len(set(cars)) != 2 or any(not (1 <= int(c) <= field_size) for c in cars):
-            detail[label] = "不成立"
-            continue
-        rec = daily_wides[target]
-        rec["N"] += 1
-        rec["KSUM"] += 1
-        hit = all(c in finish[:3] for c in cars)
-        if hit:
-            rec["H"] += 1
-            pair = frozenset(cars)
-            if pair in wide_payout_map:
-                rec["SUM"] += wide_payout_map[pair]
-            else:
-                warnings.append(f"R{rid}: {label} 的中ですが、{cars[0]}-{cars[1]}のワイド払戻が未入力です。")
-        detail[label] = "的中" if hit else "外れ"
     race_details.append(detail)
 
 
@@ -753,7 +615,6 @@ for group, marks in GROUP_MARKS.items():
     }
 
 
-total_wides = {key: add_records(carry_wides[key], daily_wides[key], ("N", "H", "SUM", "KSUM")) for key in daily_wides}
 
 total_unmarked = {
     name: add_records(carry_unmarked[name], daily_unmarked[name], ("N", "H", "SUM", "KSUM"))
@@ -776,27 +637,6 @@ def unmarked_summary(records):
 
 def unmarked_frame(records):
     return pd.DataFrame([bet_row(k, records[k]) for k in ("◎→×", "◎→無印1", "◎→無印2")])
-
-
-def wide_unmarked_frame(records):
-    return pd.DataFrame([bet_row(name, records[name]) for name in ("◎－無印合計", "◎－無印∩β/ε", "◎－無印1", "◎－無印2")])
-
-
-def wide_frame(records):
-    return pd.DataFrame([bet_row(f"◎－{m}", records[m]) for m in WIDE_TARGETS])
-
-
-def wide_summary(records):
-    selected = [records[m] for m in WIDE_TARGETS]
-    n = max((int(r["N"]) for r in selected), default=0)
-    ksum = sum(int(r["KSUM"]) for r in selected)
-    h = sum(int(r["H"]) for r in selected)
-    summ = sum(int(r["SUM"]) for r in selected)
-    return {"券種": "ワイド", "買い方": "◎－β／ε", "対象R（最大）": n,
-            "購入点数": ksum, "投資額": ksum * 100, "的中数": h,
-            "的中率%（対象R比）": pct(h, n), "払戻合計": summ,
-            "平均的中配当": round(summ / h, 1) if h else None,
-            "回収率%": pct(summ, ksum * 100)}
 
 
 def mark_frame(group, records):
@@ -867,9 +707,6 @@ quinella_named_total = {
     name: add_records(daily_quinella[name], past_named_quinella(name), ("N", "H", "SUM", "KSUM"))
     for name in daily_quinella
 }
-wide_x_total = add_records(daily_wide_x,carry_wide_extra.get("◎－×",blank_bet()),("N","H","SUM","KSUM"))
-wide_unmarked_total = {name:add_records(daily_wide_unmarked[name],carry_wide_extra.get(name,blank_bet()),("N","H","SUM","KSUM")) for name in daily_wide_unmarked}
-
 def compact_result(name, rec):
     """結果一覧に必要な項目だけを表示。的中率は対象R基準。"""
     r = bet_row(name, rec)
@@ -883,40 +720,6 @@ def compact_result(name, rec):
 
 with tab_result:
     st.subheader("累積成績｜◎軸の結果")
-    with st.expander("合算照合｜前日まで ＋ 当日 ＝ 累積", expanded=True):
-        audit = []
-        def audit_row(category, label, past, today, total):
-            audit.append({
-                "区分": category, "項目": label,
-                "前日まで 対象R": past["N"], "当日 対象R": today["N"], "累積 対象R": total["N"],
-                "前日まで 的中": past.get("H", 0), "当日 的中": today.get("H", 0), "累積 的中": total.get("H", 0),
-                "前日まで 払戻": past.get("SUM", 0), "当日 払戻": today.get("SUM", 0), "累積 払戻": total.get("SUM", 0),
-            })
-        for g in GROUP_MARKS:
-            for m in GROUP_MARKS[g]:
-                past, today, total = carry_mark_records[g][m], daily_mark_records[g][m], total_mark_records[g][m]
-                audit.append({"区分": f"{g}印", "項目": m,
-                              "前日まで 対象R": past["N"], "当日 対象R": today["N"], "累積 対象R": total["N"],
-                              "前日まで 1着": past["C1"], "当日 1着": today["C1"], "累積 1着": total["C1"],
-                              "前日まで 2着": past["C2"], "当日 2着": today["C2"], "累積 2着": total["C2"],
-                              "前日まで 3着": past["C3"], "当日 3着": today["C3"], "累積 3着": total["C3"]})
-            for a, b in BET_PAIRS[g]:
-                audit_row(f"{g}2車単", f"{a}→{b}", carry_bet_records[g][(a,b)], daily_bet_records[g][(a,b)], total_bet_records[g][(a,b)])
-        for label in daily_quinella_labels:
-            audit_row("2車複", label, past_named_quinella(label), daily_quinella[label], quinella_named_total[label])
-        for g in GROUP_MARKS:
-            for label, prior in carry_quinella_all[g].items():
-                audit_row(f"{g}2車複全組", "－".join(label), prior,
-                          quinella_all_records[g].get(label, blank_bet()), quinella_all_total[g][label])
-        for m in WIDE_TARGETS:
-            audit_row("ワイド", f"◎－{m}", carry_wides[m], daily_wides[m], total_wides[m])
-        audit_row("ワイド", "◎－×", carry_wide_extra["◎－×"], daily_wide_x, wide_x_total)
-        for label in wide_unmarked_names:
-            audit_row("ワイド", label, carry_wide_extra[label], daily_wide_unmarked[label], wide_unmarked_total[label])
-        for label in ("◎→無印1", "◎→無印2"):
-            audit_row("2車単無印", label, carry_unmarked[label], daily_unmarked[label], total_unmarked[label])
-        show_full_table(pd.DataFrame(audit).fillna("—"))
-        st.caption("各行の累積は前日までの集計と当日の集計を加算。印は1～3着、車券は的中数・払戻額まで照合できます。")
     st.caption(f"本日有効：通常{valid_races['通常']}R／妙味{valid_races['妙味']}R・除外{excluded_races}R。過去引継ぎと本日入力を合算。1点100円換算。")
 
     # 2車単は通常◎の1着固定、2車複は通常◎を含む組み合わせだけ。
@@ -925,7 +728,7 @@ with tab_result:
     )
     # 2車複の過去引継ぎは「記号別比較」側にも存在する。
     # 全21組の引継ぎが未入力でも、◎軸の記号別引継ぎから累積を表示する。
-    # 21組側と記号別側を加算すると二重計上するため、◎軸は記号別のみを採用。
+    # 引継ぎは記号別入力優先、未入力時だけ21組を参照し二重加算を防ぐ。
     quinella_diamond = sum_bets(
         quinella_named_total[label] for label in
         ("◎－○", "◎－▲", "◎－△", "◎－×", "◎－無印合計")
@@ -971,11 +774,6 @@ with tab_result:
                             for m in GROUP_MARKS["妙味"][1:]]
     show_full_table(style_roi(pd.DataFrame(value_quinella_rows)))
     st.caption("妙味2車複は『全組み合わせ（過去分引継ぎ）』の妙味評価欄を使用します。未入力の過去分は0として扱います。")
-
-    st.subheader("ワイド｜買い目別【累積】")
-    show_full_table(style_roi(wide_frame(total_wides)))
-    show_full_table(style_roi(pd.DataFrame([compact_result("◎－×", wide_x_total)])))
-    show_full_table(style_roi(wide_unmarked_frame(wide_unmarked_total)))
 
     st.subheader("印着内率【累積】")
     for group in GROUP_MARKS:
@@ -1031,12 +829,6 @@ with tab_result:
         file_name="velovi_axis_3point_summary.csv", mime="text/csv"
     )
     st.download_button("2車複 記号別比較 CSV", data=pd.DataFrame([bet_row(name, quinella_named_total[name]) for name in daily_quinella]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_quinella_daily.csv", mime="text/csv")
-    st.download_button("ワイド ◎－× CSV", data=pd.DataFrame([bet_row("◎－×", wide_x_total)]).to_csv(index=False).encode("utf-8-sig"),
-                       file_name="velovi_wide_x_daily.csv", mime="text/csv")
-    st.download_button("ワイド ◎－無印・重複抽出 CSV", data=wide_unmarked_frame(daily_wide_unmarked).to_csv(index=False).encode("utf-8-sig"),
-                       file_name="velovi_wide_unmarked_daily.csv", mime="text/csv")
-    st.download_button("ワイド ◎－β／ε CSV", data=wide_frame(total_wides).to_csv(index=False).encode("utf-8-sig"),
-                       file_name="velovi_wide_beta_epsilon.csv", mime="text/csv")
     for group in GROUP_MARKS:
         export = bet_frame(group, total_bet_records)
         st.download_button(
