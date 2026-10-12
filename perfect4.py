@@ -3,7 +3,7 @@
 
 元の618行版を基準とした仕様:
 - 通常 ◎○▲△× / 妙味 αβγεΩ の印着内率
-- 2車単は各軸の表裏8通りだけ（通常◎、妙味α）
+- 2車単は各軸の1着固定4通りだけ（通常◎、妙味α）
 - 通常◎→○▲△ / 妙味α→γβε の3点セット集計
 - 旧通常評価の入力キー・引継ぎキーを維持
 - 日次100レース、除外、CSV、日次・累積レース別確認
@@ -28,11 +28,7 @@ GROUP_AXES = {g: marks[0] for g, marks in GROUP_MARKS.items()}
 
 def all_axis_pairs(marks: Tuple[str, ...]) -> List[Tuple[str, str]]:
     axis = marks[0]
-    result = []
-    for other in marks[1:]:
-        result.append((axis, other))
-        result.append((other, axis))
-    return result
+    return [(axis, other) for other in marks[1:]]
 
 
 BET_PAIRS = {g: all_axis_pairs(marks) for g, marks in GROUP_MARKS.items()}
@@ -317,7 +313,7 @@ with tab_carry:
         except (ValueError, KeyError, TypeError, UnicodeError) as exc:
             st.error(f"完全バックアップを復元できません: {exc}")
     st.caption(
-        "通常評価は旧版の印別1～3着回数と、◎を含む2車単表裏8通りを転記。"
+        "通常評価は印別1～3着回数と、◎1着固定の2車単4通りを転記。"
         "妙味評価はα軸の成績を新規入力。旧版の他の2車単は転記不要です。"
         "引継ぎ対象Nは各印・買い目ごとに入力できます。"
     )
@@ -359,7 +355,7 @@ with tab_carry:
                 if x1 + x2 + x3 > n:
                     st.warning(f"{group}{mark}: 1～3着回数合計が対象Nを超えています。")
 
-            st.markdown(f"### {group}評価｜2車単・軸の表裏8通り（引継ぎ）")
+            st.markdown(f"### {group}評価｜2車単・軸1着固定4通り（引継ぎ）")
             h = st.columns([2.4, 1.0, 1.3, 1.3])
             for col, title in zip(h, ["買い目", "対象N", "的中H", "払戻合計SUM"]):
                 col.markdown(f"**{title}**")
@@ -494,7 +490,7 @@ for entry in daily_rows:
             if mark:
                 daily_mark_records[group][mark][f"C{pos}"] += 1
 
-        # 2車単は軸を含む表裏のみ。
+        # 2車単は軸1着固定のみ。
         hits = []
         for a, b in BET_PAIRS[group]:
             if a not in marks or b not in marks:
