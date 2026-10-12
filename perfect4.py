@@ -299,8 +299,67 @@ carry_quinella_all = {g:{} for g in GROUP_MARKS}
 carry_quinella_named = {}
 carry_wide_extra = {}
 
+# 保存・復元はセッション外でも使える明示的なJSONバックアップで行う。
+# Streamlit Cloudではローカルファイルの永続性を保証できないため、
+# サーバー内ファイルへの自動保存だけに依存しない。
+CARRY_KEY_PREFIXES = (
+    "carry_mark_", "alpha_carry_mark_", "carry_", "pair_carry_",
+    "alpha_carry_", "unmarked_", "wide_carry_", "carry_qall_",
+    "carry_qnamed_", "carry_wextra_",
+)
+
+
+def export_complete_backup():
+    carry = {}
+    for key, value in st.session_state.items():
+        if isinstance(key, str) and key.startswith(CARRY_KEY_PREFIXES) and isinstance(value, (int, float, str, bool)):
+            carry[key] = int(value) if isinstance(value, (int, float)) else value
+    return {
+        "format": "velovi_complete_backup_v1",
+        "daily_rows": st.session_state["velovi_saved_daily_50"],
+        "carry_values": carry,
+    }
+
+
+def restore_complete_backup(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("バックアップ形式が不正です")
+    rows = payload.get("daily_rows")
+    carry = payload.get("carry_values")
+    if not isinstance(rows, list) or len(rows) != 100:
+        raise ValueError("日次データが100R分ありません")
+    if not isinstance(carry, dict):
+        raise ValueError("引継ぎ値が含まれていません。日次のみの旧バックアップです")
+    clean_carry = {}
+    for key, value in carry.items():
+        if not isinstance(key, str) or not key.startswith(CARRY_KEY_PREFIXES):
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 or int(value) != value:
+            raise ValueError(f"引継ぎ値が不正です: {key}")
+        clean_carry[key] = int(value)
+    new_rows = []
+    for i, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            raise ValueError(f"日次{i}Rの形式が不正です")
+        new_rows.append({**_empty_race(i), **row})
+    st.session_state["velovi_saved_daily_50"] = new_rows
+    # 復元ファイルにない過去値が混ざらないように初期化する。
+    for key in list(st.session_state):
+        if isinstance(key, str) and (key.startswith(CARRY_KEY_PREFIXES) or key.startswith(("p0_", "p1_"))):
+            del st.session_state[key]
+    st.session_state.update(clean_carry)
+
+
 with tab_carry:
     st.subheader("前日までの集計（累積・引継ぎ）")
+    st.warning("引継ぎ値はセッション内だけでは永続保存されません。入力後に下部の『日次＋引継ぎをまとめてバックアップ』を保存し、次回はここから復元してください。")
+    restored_file = st.file_uploader("日次＋前日までの集計を復元（完全バックアップJSON）", type=["json"], key="velovi_complete_restore_file")
+    if st.button("完全バックアップを復元", disabled=restored_file is None, key="velovi_complete_restore_button"):
+        try:
+            restore_complete_backup(json.loads(restored_file.getvalue().decode("utf-8")))
+            st.rerun()
+        except (ValueError, KeyError, TypeError, UnicodeError) as exc:
+            st.error(f"完全バックアップを復元できません: {exc}")
     st.caption(
         "通常評価は旧版の印別1～3着回数と、◎を含む2車単表裏8通りを転記。"
         "妙味評価はα軸の成績を新規入力。旧版の他の2車単は転記不要です。"
@@ -421,6 +480,13 @@ with tab_carry:
             cs = cc[4].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
             carry_wide_extra[label] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cp)}
         st.form_submit_button("前日までの集計を反映")
+    st.download_button(
+        "日次＋引継ぎをまとめてバックアップ（JSON）",
+        data=json.dumps(export_complete_backup(), ensure_ascii=False, indent=2).encode("utf-8"),
+        file_name="velovi_complete_backup.json", mime="application/json",
+        key="velovi_complete_backup_download",
+    )
+    st.caption("バックアップには日次100Rと印着内率、2車単、2車複、ワイドの全引継ぎ入力値を含みます。引継ぎ値の変更後は再度ダウンロードしてください。")
 
 
 # ============================================================
@@ -772,7 +838,24 @@ quinella_all_total = {g:{} for g in GROUP_MARKS}
 for g in GROUP_MARKS:
     for pair in set(quinella_all_records[g]) | set(carry_quinella_all[g]):
         quinella_all_total[g][pair] = add_records(quinella_all_records[g].get(pair, blank_bet()), carry_quinella_all[g].get(pair, blank_bet()), ("N","H","SUM","KSUM"))
-quinella_named_total = {name:add_records(daily_quinella[name],carry_quinella_named.get(name,blank_bet()),("N","H","SUM","KSUM")) for name in daily_quinella}
+# 「全21組」と「記号別比較」のどちらに前日分を入力しても◎軸累積へ反映。
+# 同一買い目の二重加算を防止するため、記号別比較が入力済みなら優先する。
+def past_named_quinella(label):
+    named = carry_quinella_named.get(label, blank_bet())
+    if any(int(named.get(field, 0)) for field in ("N", "H", "SUM", "KSUM")):
+        return named
+    if label == "◎－無印合計":
+        pieces = [carry_quinella_all["通常"].get(("◎", m), blank_bet()) for m in ("無印1", "無印2")]
+        return sum_bets(pieces)
+    if label in ("◎－○", "◎－▲", "◎－△", "◎－×"):
+        return carry_quinella_all["通常"].get(("◎", label.split("－", 1)[1]), blank_bet())
+    # 妙味印と通常◎との重なりは過去の各レース情報なしには再構成できない。
+    return named
+
+quinella_named_total = {
+    name: add_records(daily_quinella[name], past_named_quinella(name), ("N", "H", "SUM", "KSUM"))
+    for name in daily_quinella
+}
 wide_x_total = add_records(daily_wide_x,carry_wide_extra.get("◎－×",blank_bet()),("N","H","SUM","KSUM"))
 wide_unmarked_total = {name:add_records(daily_wide_unmarked[name],carry_wide_extra.get(name,blank_bet()),("N","H","SUM","KSUM")) for name in daily_wide_unmarked}
 
@@ -798,6 +881,40 @@ def sum_bets(records):
 
 with tab_result:
     st.subheader("累積成績｜◎軸の結果")
+    with st.expander("合算照合｜前日まで ＋ 当日 ＝ 累積", expanded=True):
+        audit = []
+        def audit_row(category, label, past, today, total):
+            audit.append({
+                "区分": category, "項目": label,
+                "前日まで 対象R": past["N"], "当日 対象R": today["N"], "累積 対象R": total["N"],
+                "前日まで 的中": past.get("H", 0), "当日 的中": today.get("H", 0), "累積 的中": total.get("H", 0),
+                "前日まで 払戻": past.get("SUM", 0), "当日 払戻": today.get("SUM", 0), "累積 払戻": total.get("SUM", 0),
+            })
+        for g in GROUP_MARKS:
+            for m in GROUP_MARKS[g]:
+                past, today, total = carry_mark_records[g][m], daily_mark_records[g][m], total_mark_records[g][m]
+                audit.append({"区分": f"{g}印", "項目": m,
+                              "前日まで 対象R": past["N"], "当日 対象R": today["N"], "累積 対象R": total["N"],
+                              "前日まで 1着": past["C1"], "当日 1着": today["C1"], "累積 1着": total["C1"],
+                              "前日まで 2着": past["C2"], "当日 2着": today["C2"], "累積 2着": total["C2"],
+                              "前日まで 3着": past["C3"], "当日 3着": today["C3"], "累積 3着": total["C3"]})
+            for a, b in BET_PAIRS[g]:
+                audit_row(f"{g}2車単", f"{a}→{b}", carry_bet_records[g][(a,b)], daily_bet_records[g][(a,b)], total_bet_records[g][(a,b)])
+        for label in daily_quinella_labels:
+            audit_row("2車複", label, past_named_quinella(label), daily_quinella[label], quinella_named_total[label])
+        for g in GROUP_MARKS:
+            for label, prior in carry_quinella_all[g].items():
+                audit_row(f"{g}2車複全組", "－".join(label), prior,
+                          quinella_all_records[g].get(label, blank_bet()), quinella_all_total[g][label])
+        for m in WIDE_TARGETS:
+            audit_row("ワイド", f"◎－{m}", carry_wides[m], daily_wides[m], total_wides[m])
+        audit_row("ワイド", "◎－×", carry_wide_extra["◎－×"], daily_wide_x, wide_x_total)
+        for label in wide_unmarked_names:
+            audit_row("ワイド", label, carry_wide_extra[label], daily_wide_unmarked[label], wide_unmarked_total[label])
+        for label in ("◎→無印1", "◎→無印2"):
+            audit_row("2車単無印", label, carry_unmarked[label], daily_unmarked[label], total_unmarked[label])
+        show_full_table(pd.DataFrame(audit).fillna("—"))
+        st.caption("各行の累積は前日までの集計と当日の集計を加算。印は1～3着、車券は的中数・払戻額まで照合できます。")
     st.caption(f"本日有効：通常{valid_races['通常']}R／妙味{valid_races['妙味']}R・除外{excluded_races}R。過去引継ぎと本日入力を合算。1点100円換算。")
 
     # 2車単は通常◎の1着固定、2車複は通常◎を含む組み合わせだけ。
