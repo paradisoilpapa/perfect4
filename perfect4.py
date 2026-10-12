@@ -840,6 +840,17 @@ for g in GROUP_MARKS:
         quinella_all_total[g][pair] = add_records(quinella_all_records[g].get(pair, blank_bet()), carry_quinella_all[g].get(pair, blank_bet()), ("N","H","SUM","KSUM"))
 # 「全21組」と「記号別比較」のどちらに前日分を入力しても◎軸累積へ反映。
 # 同一買い目の二重加算を防止するため、記号別比較が入力済みなら優先する。
+def sum_bets(records):
+    """同じ軸からの異なる買い目を各100円ずつ購入した合算。"""
+    selected = list(records)
+    if not selected:
+        return blank_bet()
+    return {"N": max(int(r["N"]) for r in selected),
+            "KSUM": sum(int(r["KSUM"]) for r in selected),
+            "H": sum(int(r["H"]) for r in selected),
+            "SUM": sum(int(r["SUM"]) for r in selected)}
+
+
 def past_named_quinella(label):
     named = carry_quinella_named.get(label, blank_bet())
     if any(int(named.get(field, 0)) for field in ("N", "H", "SUM", "KSUM")):
@@ -868,15 +879,6 @@ def compact_result(name, rec):
             "収支": r["払戻合計"] - r["投資額"], "回収率%": r["回収率%"]}
 
 
-def sum_bets(records):
-    """同じ軸からの異なる買い目を各100円ずつ購入した合算。"""
-    selected = list(records)
-    if not selected:
-        return blank_bet()
-    return {"N": max(int(r["N"]) for r in selected),
-            "KSUM": sum(int(r["KSUM"]) for r in selected),
-            "H": sum(int(r["H"]) for r in selected),
-            "SUM": sum(int(r["SUM"]) for r in selected)}
 
 
 with tab_result:
