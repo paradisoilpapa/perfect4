@@ -45,6 +45,28 @@ def trio_tickets(normal, value, targets, *, box=False):
         return [tuple(sorted(cars, key=int)) for cars in combinations([axis] + selected, 3)]
     return [tuple(sorted((axis, x, y), key=int)) for x, y in combinations(selected, 2)]
 
+# 基本▲軸と同一条件で比較する追加4軸。既存5方式は変更しない。
+AXIS_TRIO_COMPARE = {
+    "▲軸（基本）": ("▲", ("◎", "○", "α")),
+    "◎軸": ("◎", ("○", "▲", "α")),
+    "○軸": ("○", ("◎", "▲", "α")),
+    "α軸": ("α", ("◎", "○", "▲")),
+    "ε軸": ("ε", ("◎", "○", "α")),
+}
+
+def axis_trio_tickets(normal, value, axis_mark, targets):
+    def car(mark):
+        return normal.get(mark) if mark in ("◎", "○", "▲", "△", "×") else value.get(mark)
+    axis = car(axis_mark)
+    if not axis:
+        return []
+    partners = []
+    for mark in targets:
+        candidate = car(mark)
+        if candidate and candidate != axis and candidate not in partners:
+            partners.append(candidate)
+    return [tuple(sorted((axis, a, b), key=int)) for a, b in combinations(partners, 2)]
+
 SET_TARGETS = {"通常": ("○", "▲", "△"), "妙味": ("γ", "β", "ε")}
 GROUP_AXES = {g: marks[0] for g, marks in GROUP_MARKS.items()}
 
@@ -460,6 +482,7 @@ daily_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 daily_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
 daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
 daily_trio = {name: blank_bet() for name in TRIO_PATTERNS}
+daily_axis_trio = {name: blank_bet() for name in AXIS_TRIO_COMPARE}
 trio_missing = 0
 daily_quinella = {name: blank_bet() for name in ('◎－○', '◎－▲', '◎－△', '◎－×', '◎－無印合計', '◎－β', '◎－ε')}
 quinella_missing_payouts = 0
@@ -594,6 +617,26 @@ for entry in daily_rows:
                     warnings.append(f"R{rid}: 3連複 {name} 的中ですが払戻未入力です。")
             detail[f"3連複 {name}"] = "的中" if hit else "外れ"
             detail[f"3連複 {name} 点数"] = len(tickets)
+    # 5軸を同じ対象R・同じ払戻で並行検証（引継ぎ値は混ぜない）。
+    if (len(trio_normal) == 5 and len(trio_value) == 5
+            and all(1 <= int(c) <= field_size for c in list(trio_normal.values()) + list(trio_value.values()))
+            and all(1 <= int(c) <= field_size for c in finish)):
+        for name, (axis_mark, targets) in AXIS_TRIO_COMPARE.items():
+            tickets = axis_trio_tickets(trio_normal, trio_value, axis_mark, targets)
+            rec = daily_axis_trio[name]
+            if tickets:
+                rec["N"] += 1
+                rec["KSUM"] += len(tickets)
+                hit = tuple(sorted(finish[:3], key=int)) in tickets
+                if hit:
+                    rec["H"] += 1
+                    rec["SUM"] += trio_pay
+                    if trio_pay <= 0:
+                        warnings.append(f"R{rid}: {name} 的中ですが3連複払戻が未入力です。")
+                detail[f"3連複比較 {name}"] = "的中" if hit else "外れ"
+                detail[f"3連複比較 {name} 点数"] = len(tickets)
+            else:
+                detail[f"3連複比較 {name}"] = "成立なし"
     # α頭2車単4点と④3連複の同時的中を判定（過去引継ぎの集計値からは復元不可）。
     if (len(trio_normal) == 5 and len(trio_value) == 5
             and all(1 <= int(c) <= field_size for c in list(trio_normal.values()) + list(trio_value.values()))
@@ -855,6 +898,12 @@ with tab_result:
     if trio_missing:
         st.warning(f"3連複の的中{trio_missing}件で払戻未入力です。回収率は暫定値です。")
     st.download_button("3連複5方式 集計CSV", data=trio_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_five_patterns.csv", mime="text/csv")
+
+    st.subheader("3連複｜基本▲軸と◎・○・α・ε軸の同条件比較【日次】")
+    st.caption("基本▲－◎○α－◎○α。各軸とも最大3点、重複車番は除外。過去引継ぎの合算値では別軸の的中を復元できないため、日次レース入力のみで比較します。")
+    axis_compare_df = pd.DataFrame([compact_result(name, daily_axis_trio[name]) for name in AXIS_TRIO_COMPARE])
+    show_full_table(style_roi(axis_compare_df))
+    st.download_button("3連複5軸比較CSV", data=axis_compare_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_axis_comparison.csv", mime="text/csv")
 
     st.subheader("α頭2車単4点 × ④3連複｜併用検証【日次】")
     st.caption("レース単位の重複・補完を検証。過去の引継ぎ集計には的中の同時性が記録されていないため、日次入力データだけが対象です。")
