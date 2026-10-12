@@ -826,5 +826,3 @@ with tab_result:
             mime="text/csv"
         )
 
-    for q_group, q_export in quinella_all_exports.items():
-        st.download_button(f"{q_group}・2車複 個別CSV", data=q_export.to_csv(index=False).encode("utf-8-sig"), file_name=f"velovi_quinella_{'normal' if q_group == '通常' else 'value'}.csv", mime="text/csv")
