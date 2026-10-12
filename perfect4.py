@@ -1,4 +1,4 @@
-# v335集計追加：3連複 ▲1車軸4方式。既存集計維持。
+# v335集計追加：3連複 ▲1車軸4方式＋4車BOX。既存集計維持。
 # -*- coding: utf-8 -*-
 """ヴェロビ集計｜通常◎・妙味α 集計版。
 
@@ -28,9 +28,10 @@ TRIO_PATTERNS = {
     "▲－◎○αε－◎○αε（6点）": ("◎", "○", "α", "ε"),
     "▲－◎αε－◎αε（3点）": ("◎", "α", "ε"),
     "▲－◎○α－◎○α（3点）": ("◎", "○", "α"),
+    "▲◎○α・4車BOX（4点）": ("◎", "○", "α"),
 }
 
-def trio_tickets(normal, value, targets):
+def trio_tickets(normal, value, targets, *, box=False):
     """▲の1車軸。通常印と妙味印から車番を取得し、重複車番を除去。"""
     if "▲" not in normal:
         return []
@@ -40,6 +41,8 @@ def trio_tickets(normal, value, targets):
         car = normal.get(mark) if mark in ("◎", "○") else value.get(mark)
         if car and car != axis and car not in selected:
             selected.append(car)
+    if box:
+        return [tuple(sorted(cars, key=int)) for cars in combinations([axis] + selected, 3)]
     return [tuple(sorted((axis, x, y), key=int)) for x, y in combinations(selected, 2)]
 
 SET_TARGETS = {"通常": ("○", "▲", "△"), "妙味": ("γ", "β", "ε")}
@@ -436,7 +439,7 @@ with tab_carry:
                 legacy = old_record(f"carry_qall_v_α_{other}")
             carry_quinella_all["妙味"][("α",other)] = carry_entry(
                 f"α－{other}", "unified_2f_value_"+other, legacy)
-        st.markdown("### 3連複｜▲1車軸・4方式（過去分引継ぎ）")
+        st.markdown("### 3連複｜▲1車軸4方式＋4車BOX（過去分引継ぎ）")
         header()
         for idx, name in enumerate(TRIO_PATTERNS, 1):
             carry_trio[name] = carry_entry(name, f"trio2_carry_{idx}")
@@ -573,7 +576,7 @@ for entry in daily_rows:
             and all(1 <= int(c) <= field_size for c in list(trio_normal.values()) + list(trio_value.values()))
             and all(1 <= int(c) <= field_size for c in finish)):
         for name, targets in TRIO_PATTERNS.items():
-            tickets = trio_tickets(trio_normal, trio_value, targets)
+            tickets = trio_tickets(trio_normal, trio_value, targets, box="BOX" in name)
             if not tickets:
                 detail[f"3連複 {name}"] = "成立なし"
                 continue
@@ -825,13 +828,13 @@ with tab_result:
     show_full_table(style_roi(pd.DataFrame(value_quinella_rows)))
     st.caption("妙味2車複は『全組み合わせ（過去分引継ぎ）』の妙味評価欄を使用します。未入力の過去分は0として扱います。")
 
-    st.subheader("3連複｜▲1車軸・4方式【累積】")
-    st.caption("▲－◎○ε－◎○ε（通常3点）／▲－◎○αε－◎○αε（通常6点）。同一車番の重複は除き、成立点数で投資額を計算。両評価の5印入力が必要です。")
+    st.subheader("3連複｜▲1車軸4方式＋4車BOX【累積】")
+    st.caption("▲1車軸4方式と▲◎○αの4車BOX（最大4点）。同一車番の重複は除き、成立点数で投資額を計算。両評価の5印入力が必要です。")
     trio_df = pd.DataFrame([compact_result(name, total_trio[name]) for name in TRIO_PATTERNS])
     show_full_table(style_roi(trio_df))
     if trio_missing:
         st.warning(f"3連複の的中{trio_missing}件で払戻未入力です。回収率は暫定値です。")
-    st.download_button("3連複4方式 集計CSV", data=trio_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_four_patterns.csv", mime="text/csv")
+    st.download_button("3連複5方式 集計CSV", data=trio_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_five_patterns.csv", mime="text/csv")
 
     st.subheader("印着内率【累積】")
     for group in GROUP_MARKS:
@@ -845,7 +848,7 @@ with tab_result:
 
 
     with st.expander("本日分だけの成績", expanded=False):
-        st.markdown("**3連複4方式・本日分**")
+        st.markdown("**3連複5方式・本日分**")
         show_full_table(style_roi(pd.DataFrame([compact_result(name, daily_trio[name]) for name in TRIO_PATTERNS])))
         today_df = pd.DataFrame([set_summary(group, daily_bet_records) for group in GROUP_MARKS])
         show_full_table(style_roi(today_df))
