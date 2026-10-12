@@ -6,7 +6,7 @@
 - 2車単は各軸の1着固定4通りだけ（通常◎、妙味α）
 - 通常◎→○▲△ / 妙味α→γβε の3点セット集計
 - 旧通常評価の入力キー・引継ぎキーを維持
-- 日次100レース、除外、CSV、日次・累積レース別確認
+- 日次100レース、除外、集計CSV、日次・累積レース別確認
 """
 from typing import Dict, List, Tuple
 import re
@@ -797,32 +797,3 @@ with tab_result:
 
     st.divider()
     st.download_button("◎・α軸｜2車単・2車複 集計CSV", data=primary.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_diamond_axis.csv", mime="text/csv")
-
-    st.subheader("個別CSV（必要な場合のみ）")
-    st.download_button(
-        "◎→×・無印・無印 CSV",
-        data=pd.DataFrame([bet_row("◎→無印",total_unmarked["◎→無印"])]).to_csv(index=False).encode("utf-8-sig"),
-        file_name="velovi_unmarked_exacta.csv", mime="text/csv"
-    )
-    st.download_button(
-        "◎・α 3点セット比較CSV",
-        data=summary_df.to_csv(index=False).encode("utf-8-sig"),
-        file_name="velovi_axis_3point_summary.csv", mime="text/csv"
-    )
-    st.download_button("2車複 記号別比較 CSV", data=pd.DataFrame([bet_row(name, quinella_named_total[name]) for name in daily_quinella]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_quinella_daily.csv", mime="text/csv")
-    for group in GROUP_MARKS:
-        export = bet_frame(group, total_bet_records)
-        st.download_button(
-            f"{group}評価・2車単累積成績CSV",
-            data=export.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"velovi_2t_{'normal' if group == '通常' else 'alpha'}.csv",
-            mime="text/csv"
-        )
-        mark_export = mark_frame(group, total_mark_records)
-        st.download_button(
-            f"{group}評価・印着内率CSV",
-            data=mark_export.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"velovi_marks_{'normal' if group == '通常' else 'alpha'}.csv",
-            mime="text/csv"
-        )
-
