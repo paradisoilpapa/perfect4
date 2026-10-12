@@ -245,7 +245,7 @@ with tab_daily:
 # ============================================================
 carry_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 carry_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
-carry_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
+carry_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印")}
 
 daily_quinella_labels = ('◎－○', '◎－▲', '◎－△', '◎－×', '◎－無印合計', '◎－β', '◎－ε')
 carry_quinella_all = {g:{} for g in GROUP_MARKS}
@@ -257,7 +257,7 @@ carry_quinella_named = {}
 CARRY_KEY_PREFIXES = (
     "carry_mark_", "alpha_carry_mark_", "carry_", "pair_carry_",
     "alpha_carry_", "unmarked_", "wide_carry_", "carry_qall_",
-    "carry_qnamed_", "carry_wextra_",
+    "carry_qnamed_", "carry_wextra_", "unified_",
 )
 
 
@@ -317,21 +317,7 @@ with tab_carry:
         "妙味評価はα軸の成績を新規入力。旧版の他の2車単は転記不要です。"
         "引継ぎ対象Nは各印・買い目ごとに入力できます。"
     )
-    st.markdown("""#### まず入力する数字の意味
-**過去分**とは、今回の「日次入力」に入っていないレースの集計です。日次欄にも同じレースを残している場合、引継ぎにも入れると二重計上になります。
-
-| 項目 | 入力する値 | 例：過去44Rで◎－▲が7回的中、払戻計1,920円 |
-|---|---|---|
-| 対象R（対象N） | その買い目を判定できた過去レース数 | **44** |
-| 購入点数 | 対象期間にその買い目を各100円で買ったと仮定した合計口数 | **44**（毎R1点なら対象Rと同じ） |
-| 的中数（的中H） | その買い目が当たった回数 | **7** |
-| 払戻合計（SUM） | 当たり券の**100円あたりの払戻金を合計**した金額 | **1,920** |
-
-上の例は「**通常評価・2車複の◎－▲**」の欄に **44 / 7 / 1920** と入れます。回収率は自動計算されるので入力不要です。
-
-**入力元：** 以前の集計アプリに表示された「対象R・購入点数・的中数・払戻合計」を、**同じ券種・同じ印の組み合わせ**の欄へ転記してください。**2車単と2車複、通常印と妙味印は別物**です。過去の集計値が分からない欄は **0のまま**にし、推測値を入れないでください。
-""")
-    st.warning("重要：下の『全21組』と『記号別比較』は同じレースを別の切り口で示す**別々の集計表**です。それぞれの過去集計がある場合だけ転記します。両方へ入力しても各表の中で二重加算はしません。『無印合計』は1Rにつき通常2点（7車立て）、個別の『無印1』『無印2』は各1点です。")
+    st.caption("前日までの対象R・購入点数・的中数・払戻合計を入力します。無印は順位なしで一括集計します。")
     with st.form("carryover_form"):
         for group, marks in GROUP_MARKS.items():
             st.markdown(f"### {group}評価｜印別 入賞回数（引継ぎ）")
@@ -355,59 +341,79 @@ with tab_carry:
                 if x1 + x2 + x3 > n:
                     st.warning(f"{group}{mark}: 1～3着回数合計が対象Nを超えています。")
 
-            st.markdown(f"### {group}評価｜2車単・軸1着固定4通り（引継ぎ）")
-            h = st.columns([2.4, 1.0, 1.3, 1.3])
-            for col, title in zip(h, ["買い目", "対象N", "的中H", "払戻合計SUM"]):
-                col.markdown(f"**{title}**")
-            for a, b in BET_PAIRS[group]:
-                c0, c1, c2, c3 = st.columns([2.4, 1.0, 1.3, 1.3])
-                c0.markdown(f"**{a}→{b}**")
-                key_n, key_h, key_sum = carry_keys(group, a, b)
-                n = c1.number_input("対象N", min_value=0, value=0, step=1,
-                                    key=key_n, label_visibility="collapsed")
-                h = c2.number_input("的中H", min_value=0, value=0, step=1,
-                                    key=key_h, label_visibility="collapsed")
-                summ = c3.number_input("払戻合計", min_value=0, value=0, step=10,
-                                       key=key_sum, label_visibility="collapsed")
-                carry_bet_records[group][(a, b)] = {
-                    "N": int(n), "H": int(h), "SUM": int(summ), "KSUM": int(n)
-                }
-                if h > n:
-                    st.warning(f"{group} {a}→{b}: 的中Hが対象Nを超えています。")
-        st.markdown("### 通常評価｜◎→×・無印2車（引継ぎ）")
-        st.caption("◎→×は上の通常評価2車単から自動引継ぎします。無印1・2の過去分がある場合のみ入力してください。過去の無印実績が不明なら0のまま、新規分から集計します。")
-        for label in ("◎→無印1", "◎→無印2"):
-            c0, c1, c2, c3 = st.columns([2.4, 1.0, 1.3, 1.3])
-            c0.markdown(f"**{label}**")
-            n = c1.number_input("対象N", min_value=0, step=1, key=f"unmarked_n_{label}", label_visibility="collapsed")
-            h = c2.number_input("的中H", min_value=0, step=1, key=f"unmarked_h_{label}", label_visibility="collapsed")
-            summ = c3.number_input("払戻合計", min_value=0, step=10, key=f"unmarked_sum_{label}", label_visibility="collapsed")
-            carry_unmarked[label] = {"N": int(n), "H": int(h), "SUM": int(summ), "KSUM": int(n)}
-            if h > n:
-                st.warning(f"{label}: 的中Hが対象Nを超えています。")
-        st.markdown("### 2車複｜全組み合わせ（過去分引継ぎ）")
-        st.caption("列は左から【組み合わせ｜対象R｜的中数｜払戻合計（円）】。通常と妙味を別々に入力。7車立ての各組は1R1点なので購入点数＝対象Rです。例：◎－▲なら 44｜7｜1920。")
-        for cg in GROUP_MARKS:
-            with st.expander(f"{cg}評価・2車複21組の引継ぎ"):
-                for ca, cb in combinations(list(GROUP_MARKS[cg]) + ["無印1", "無印2"], 2):
-                    cc = st.columns([2, 1, 1, 1])
-                    cc[0].markdown(f"{ca}－{cb}")
-                    ck = f"carry_qall_{'n' if cg == '通常' else 'v'}_{ca}_{cb}"
-                    cn = cc[1].number_input("対象R", min_value=0, key=ck+"_n", label_visibility="collapsed")
-                    ch = cc[2].number_input("的中数", min_value=0, key=ck+"_h", label_visibility="collapsed")
-                    cs = cc[3].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
-                    carry_quinella_all[cg][(ca, cb)] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cn)}
-        st.markdown("### 2車複｜記号別比較（過去分引継ぎ）")
-        st.caption("列は【買い目｜対象R｜購入点数｜的中数｜払戻合計（円）】。◎－無印合計は無印1・2を両方買うため、7車44Rなら対象R44・購入点数88。◎－▲は44・44・7・1920。上の全21組の数字をこちらへ**自動転記はしません**。元データがある行だけ入力してください。")
-        for label in daily_quinella_labels:
-            cc = st.columns([2, 1, 1, 1, 1])
-            cc[0].markdown(label)
-            ck = f"carry_qnamed_{label}"
-            cn = cc[1].number_input("対象R", min_value=0, key=ck+"_n", label_visibility="collapsed")
-            cp = cc[2].number_input("購入点数", min_value=0, key=ck+"_points", label_visibility="collapsed")
-            ch = cc[3].number_input("的中数", min_value=0, key=ck+"_h", label_visibility="collapsed")
-            cs = cc[4].number_input("払戻合計", min_value=0, step=10, key=ck+"_sum", label_visibility="collapsed")
-            carry_quinella_named[label] = {"N":int(cn), "H":int(ch), "SUM":int(cs), "KSUM":int(cp)}
+        # 旧入力キーからの復元は下の統一欄に一度だけ取り込む。
+        def old_value(key):
+            return int(st.session_state.get(key, 0) or 0)
+
+        def old_record(prefix):
+            return {"N": old_value(prefix + "_n"), "H": old_value(prefix + "_h"),
+                    "SUM": old_value(prefix + "_sum"), "KSUM": old_value(prefix + "_points")}
+
+        def merged_legacy_unmarked(prefixes):
+            rows = [old_record(prefix) for prefix in prefixes]
+            return {"N": max((r["N"] for r in rows), default=0),
+                    "H": sum(r["H"] for r in rows), "SUM": sum(r["SUM"] for r in rows),
+                    "KSUM": sum(r["KSUM"] or r["N"] for r in rows)}
+
+        def carry_entry(label, key, legacy=None, points=None):
+            legacy = legacy or blank_bet()
+            n_default = legacy["N"]
+            k_default = legacy["KSUM"] or (n_default * points if points else n_default)
+            c = st.columns([2.3, 1, 1, 1, 1.3])
+            c[0].markdown(f"**{label}**")
+            n = c[1].number_input("対象R", min_value=0, value=n_default, key=key+"_n", label_visibility="collapsed")
+            k = c[2].number_input("購入点数", min_value=0, value=k_default, key=key+"_points", label_visibility="collapsed")
+            h = c[3].number_input("的中数", min_value=0, value=legacy["H"], key=key+"_h", label_visibility="collapsed")
+            v = c[4].number_input("払戻合計", min_value=0, value=legacy["SUM"], step=10, key=key+"_sum", label_visibility="collapsed")
+            return {"N":int(n), "KSUM":int(k), "H":int(h), "SUM":int(v)}
+
+        def header():
+            c = st.columns([2.3, 1, 1, 1, 1.3])
+            for col, name in zip(c, ("買い目", "対象R", "購入点数", "的中数", "払戻合計")):
+                col.markdown(f"**{name}**")
+
+        for group, marks in GROUP_MARKS.items():
+            axis = marks[0]
+            st.markdown(f"### {group}評価｜2車単（{axis}1着固定）")
+            header()
+            for other in marks[1:]:
+                oldkeys = carry_keys(group, axis, other)
+                legacy = {"N":old_value(oldkeys[0]), "H":old_value(oldkeys[1]),
+                          "SUM":old_value(oldkeys[2]), "KSUM":old_value(oldkeys[0])}
+                carry_bet_records[group][(axis, other)] = carry_entry(
+                    f"{axis}→{other}", f"unified_2t_{group}_{other}", legacy)
+            # 妙味α→無印も同じ表示形式で引継ぎ可能
+            if group == "通常":
+                legacy = merged_legacy_unmarked(["unmarked_"+field for field in ()]) if False else {
+                    "N":max(old_value("unmarked_n_◎→無印1"), old_value("unmarked_n_◎→無印2")),
+                    "H":old_value("unmarked_h_◎→無印1")+old_value("unmarked_h_◎→無印2"),
+                    "SUM":old_value("unmarked_sum_◎→無印1")+old_value("unmarked_sum_◎→無印2"),
+                    "KSUM":old_value("unmarked_n_◎→無印1")+old_value("unmarked_n_◎→無印2")}
+                carry_unmarked["◎→無印"] = carry_entry("◎→無印", "unified_2t_normal_unmarked", legacy)
+
+        st.markdown("### 2車複｜通常評価（◎軸）")
+        header()
+        for other in ("○", "▲", "△", "×", "無印", "β", "ε"):
+            label = "◎－" + other
+            named = old_record("carry_qnamed_" + ("◎－無印合計" if other == "無印" else label))
+            if not any(named.values()):
+                if other == "無印":
+                    prefixes = [f"carry_qall_n_◎_無印{i}" for i in (1,2)]
+                    named = merged_legacy_unmarked(prefixes)
+                elif other in ("○", "▲", "△", "×"):
+                    named = old_record(f"carry_qall_n_◎_{other}")
+            carry_quinella_named["◎－無印合計" if other == "無印" else label] = carry_entry(
+                label, "unified_2f_normal_"+other, named)
+
+        st.markdown("### 2車複｜妙味評価（α軸）")
+        header()
+        for other in ("β", "γ", "ε", "Ω", "無印"):
+            if other == "無印":
+                legacy = merged_legacy_unmarked([f"carry_qall_v_α_無印{i}" for i in (1,2)])
+            else:
+                legacy = old_record(f"carry_qall_v_α_{other}")
+            carry_quinella_all["妙味"][("α",other)] = carry_entry(
+                f"α－{other}", "unified_2f_value_"+other, legacy)
         st.form_submit_button("前日までの集計を反映")
     st.download_button(
         "日次＋引継ぎをまとめてバックアップ（JSON）",
@@ -612,10 +618,13 @@ for group, marks in GROUP_MARKS.items():
 
 
 
-total_unmarked = {
-    name: add_records(carry_unmarked[name], daily_unmarked[name], ("N", "H", "SUM", "KSUM"))
-    for name in daily_unmarked
-}
+total_unmarked = {"◎→×": add_records(carry_unmarked["◎→×"], daily_unmarked["◎→×"], ("N","H","SUM","KSUM"))}
+_daily_um = sum_bets([daily_unmarked["◎→無印1"], daily_unmarked["◎→無印2"]]) if "sum_bets" in globals() else {
+    "N": max(daily_unmarked["◎→無印1"]["N"],daily_unmarked["◎→無印2"]["N"]),
+    "H": sum(daily_unmarked[k]["H"] for k in ("◎→無印1","◎→無印2")),
+    "SUM": sum(daily_unmarked[k]["SUM"] for k in ("◎→無印1","◎→無印2")),
+    "KSUM": sum(daily_unmarked[k]["KSUM"] for k in ("◎→無印1","◎→無印2"))}
+total_unmarked["◎→無印"] = add_records(carry_unmarked["◎→無印"], _daily_um, ("N","H","SUM","KSUM"))
 
 
 def unmarked_summary(records):
@@ -688,16 +697,7 @@ def sum_bets(records):
 
 
 def past_named_quinella(label):
-    named = carry_quinella_named.get(label, blank_bet())
-    if any(int(named.get(field, 0)) for field in ("N", "H", "SUM", "KSUM")):
-        return named
-    if label == "◎－無印合計":
-        pieces = [carry_quinella_all["通常"].get(("◎", m), blank_bet()) for m in ("無印1", "無印2")]
-        return sum_bets(pieces)
-    if label in ("◎－○", "◎－▲", "◎－△", "◎－×"):
-        return carry_quinella_all["通常"].get(("◎", label.split("－", 1)[1]), blank_bet())
-    # 妙味印と通常◎との重なりは過去の各レース情報なしには再構成できない。
-    return named
+    return carry_quinella_named.get(label, blank_bet())
 
 quinella_named_total = {
     name: add_records(daily_quinella[name], past_named_quinella(name), ("N", "H", "SUM", "KSUM"))
@@ -749,8 +749,7 @@ with tab_result:
     # ◎以外の軸→全は作らず、個別買い目は常時一覧表示。
     exacta_rows = [compact_result(f"◎→{m}", total_bet_records["通常"][("◎", m)])
                    for m in GROUP_MARKS["通常"][1:]]
-    exacta_rows += [compact_result(name, total_unmarked[name])
-                    for name in ("◎→無印1", "◎→無印2")]
+    exacta_rows.append(compact_result("◎→無印", total_unmarked["◎→無印"]))
     show_full_table(style_roi(pd.DataFrame(exacta_rows)))
 
     st.subheader("2車複｜◎軸・買い目別【累積】")
@@ -778,23 +777,9 @@ with tab_result:
             "1着率%": "{:.1f}", "連対率%": "{:.1f}", "印着内率%": "{:.1f}"
         }, na_rep="—"))
 
-    quinella_all_exports = {}
-    with st.expander("2車複｜全組み合わせの詳細（◎軸以外も含む）", expanded=False):
-        st.caption("こちらは21組の個別検証です。上の◎軸累積表とは引継ぎ入力欄が別です。")
-        for q_group in GROUP_MARKS:
-            q_rows = []
-            for left, right in combinations(quinella_all_order[q_group], 2):
-                rec = quinella_all_total[q_group].get((left, right))
-                if rec and rec["N"]:
-                    q_rows.append(compact_result(f"{left}－{right}", rec))
-            q_individual_df = pd.DataFrame(q_rows, columns=list(compact_result("", blank_bet()).keys()))
-            quinella_all_exports[q_group] = q_individual_df
-            st.markdown(f"**{q_group}評価**")
-            show_full_table(style_roi(q_individual_df))
-
     summary_df = pd.DataFrame([set_summary(g, total_bet_records) for g in GROUP_MARKS])
     total_unmarked["◎→×"] = dict(total_bet_records["通常"][("◎", "×")])
-    summary_df = pd.concat([summary_df, pd.DataFrame([unmarked_summary(total_unmarked)])], ignore_index=True)
+
 
     with st.expander("本日分だけの成績", expanded=False):
         today_df = pd.DataFrame([set_summary(group, daily_bet_records) for group in GROUP_MARKS])
@@ -816,7 +801,7 @@ with tab_result:
     st.subheader("個別CSV（必要な場合のみ）")
     st.download_button(
         "◎→×・無印・無印 CSV",
-        data=unmarked_frame(total_unmarked).to_csv(index=False).encode("utf-8-sig"),
+        data=pd.DataFrame([bet_row("◎→無印",total_unmarked["◎→無印"])]).to_csv(index=False).encode("utf-8-sig"),
         file_name="velovi_unmarked_exacta.csv", mime="text/csv"
     )
     st.download_button(
