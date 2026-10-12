@@ -483,6 +483,9 @@ daily_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
 daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
 daily_trio = {name: blank_bet() for name in TRIO_PATTERNS}
 daily_axis_trio = {name: blank_bet() for name in AXIS_TRIO_COMPARE}
+FIVE_WAYS = ("2車複 α－βεΩ（3点）", "2車複 α－εΩ（2点）", "3連複 ◎軸", "3連複 ε軸", "3連複 ▲軸（比較用）")
+daily_five_ways = {name: blank_bet() for name in FIVE_WAYS}
+five_way_details = []
 trio_missing = 0
 daily_quinella = {name: blank_bet() for name in ('◎－○', '◎－▲', '◎－△', '◎－×', '◎－無印合計', '◎－β', '◎－ε')}
 quinella_missing_payouts = 0
@@ -637,6 +640,36 @@ for entry in daily_rows:
                 detail[f"3連複比較 {name} 点数"] = len(tickets)
             else:
                 detail[f"3連複比較 {name}"] = "成立なし"
+    # 5方式を完全に同じレース母集団で比較する。既存の集計は変更しない。
+    if (len(trio_normal) == 5 and len(trio_value) == 5
+            and all(1 <= int(c) <= field_size for c in list(trio_normal.values()) + list(trio_value.values()))
+            and all(1 <= int(c) <= field_size for c in finish)):
+        actual_trio = tuple(sorted(finish[:3], key=int))
+        actual_quinella = frozenset(finish[:2])
+        for name in FIVE_WAYS:
+            if name.startswith("2車複"):
+                targets = ("β", "ε", "Ω") if "βεΩ" in name else ("ε", "Ω")
+                tickets = {frozenset((trio_value["α"], trio_value[m])) for m in targets
+                           if trio_value[m] != trio_value["α"]}
+                hit = actual_quinella in tickets
+                pay_for_hit = quinella_pay
+            else:
+                axis_mark = "◎" if "◎軸" in name else "ε" if "ε軸" in name else "▲"
+                targets = ("○", "▲", "α") if axis_mark == "◎" else (("◎", "○", "α"))
+                tickets = set(axis_trio_tickets(trio_normal, trio_value, axis_mark, targets))
+                hit = actual_trio in tickets
+                pay_for_hit = trio_pay
+            rec = daily_five_ways[name]
+            rec["N"] += 1
+            rec["KSUM"] += len(tickets)
+            if hit:
+                rec["H"] += 1
+                rec["SUM"] += pay_for_hit
+                if pay_for_hit <= 0:
+                    warnings.append(f"R{rid}: {name} 的中ですが払戻が未入力です。")
+            five_way_details.append({"R":rid, "買い方":name, "点数":len(tickets),
+                                     "的中":int(hit), "投資額":100*len(tickets),
+                                     "払戻額":pay_for_hit if hit else 0})
     # α頭2車単4点と④3連複の同時的中を判定（過去引継ぎの集計値からは復元不可）。
     if (len(trio_normal) == 5 and len(trio_value) == 5
             and all(1 <= int(c) <= field_size for c in list(trio_normal.values()) + list(trio_value.values()))
@@ -898,6 +931,17 @@ with tab_result:
     if trio_missing:
         st.warning(f"3連複の的中{trio_missing}件で払戻未入力です。回収率は暫定値です。")
     st.download_button("3連複5方式 集計CSV", data=trio_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_five_patterns.csv", mime="text/csv")
+
+    st.subheader("2車複2方式＋3連複3方式｜5方式同一レース比較【日次】")
+    st.caption("両方の印5車と着順が揃うレースだけを同一母集団で比較。各点100円。2車複は2車複払戻、3連複は3連複払戻を使用。過去引継ぎ合算値は含みません。")
+    five_df = pd.DataFrame([compact_result(name, daily_five_ways[name]) for name in FIVE_WAYS])
+    show_full_table(style_roi(five_df))
+    st.download_button("5方式比較CSV", data=five_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_five_ways.csv", mime="text/csv")
+    if five_way_details:
+        with st.expander("5方式のレース別的中・投資・払戻を確認"):
+            five_detail_df = pd.DataFrame(five_way_details)
+            show_full_table(five_detail_df)
+            st.download_button("5方式レース別CSV", data=five_detail_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_five_ways_details.csv", mime="text/csv")
 
     st.subheader("3連複｜基本▲軸と◎・○・α・ε軸の同条件比較【日次】")
     st.caption("基本▲－◎○α－◎○α。各軸とも最大3点、重複車番は除外。過去引継ぎの合算値では別軸の的中を復元できないため、日次レース入力のみで比較します。")
