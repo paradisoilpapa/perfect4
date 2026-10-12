@@ -473,6 +473,7 @@ valid_races = {g: 0 for g in GROUP_MARKS}
 excluded_races = 0
 warnings: List[str] = []
 race_details: List[Dict] = []
+combined_races = []  # レース単位の同時的中判定（日次のみ）
 
 for entry in daily_rows:
     rid = str(entry["race"]).strip()
@@ -593,6 +594,25 @@ for entry in daily_rows:
                     warnings.append(f"R{rid}: 3連複 {name} 的中ですが払戻未入力です。")
             detail[f"3連複 {name}"] = "的中" if hit else "外れ"
             detail[f"3連複 {name} 点数"] = len(tickets)
+    # α頭2車単4点と④3連複の同時的中を判定（過去引継ぎの集計値からは復元不可）。
+    if (len(trio_normal) == 5 and len(trio_value) == 5
+            and all(1 <= int(c) <= field_size for c in list(trio_normal.values()) + list(trio_value.values()))
+            and all(1 <= int(c) <= field_size for c in finish)):
+        alpha_axis = trio_value["α"]
+        exacta_targets = {trio_value[m] for m in ("β", "γ", "ε", "Ω") if m in trio_value}
+        exacta_targets.discard(alpha_axis)
+        exacta_hit = finish[0] == alpha_axis and finish[1] in exacta_targets
+        trio_4_tickets = trio_tickets(trio_normal, trio_value, ("◎", "○", "α"))
+        if trio_4_tickets:
+            trio_4_hit = tuple(sorted(finish[:3], key=int)) in trio_4_tickets
+            combined_races.append({
+                "R": rid, "2車単的中": exacta_hit, "④3連複的中": trio_4_hit,
+                "2車単点数": len(exacta_targets), "3連複点数": len(trio_4_tickets),
+                "投資額": 100 * (len(exacta_targets) + len(trio_4_tickets)),
+                "払戻合計": (payout if exacta_hit else 0) + (trio_pay if trio_4_hit else 0),
+                "判定": "両方的中" if exacta_hit and trio_4_hit else
+                        "2車単のみ" if exacta_hit else "3連複のみ" if trio_4_hit else "両方不的中",
+            })
     # 2車複・全通り：各評価の5印＋無印1・2で全21通り（6車なら15通り）。
     # 無印1・2は、その評価で印のない車番を小さい順に割り当てる。
     # 同一レースで各評価は別集計。的中は1組のみで、払戻は2車複入力を使う。
@@ -835,6 +855,28 @@ with tab_result:
     if trio_missing:
         st.warning(f"3連複の的中{trio_missing}件で払戻未入力です。回収率は暫定値です。")
     st.download_button("3連複5方式 集計CSV", data=trio_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_five_patterns.csv", mime="text/csv")
+
+    st.subheader("α頭2車単4点 × ④3連複｜併用検証【日次】")
+    st.caption("レース単位の重複・補完を検証。過去の引継ぎ集計には的中の同時性が記録されていないため、日次入力データだけが対象です。")
+    if combined_races:
+        cross_df = pd.DataFrame(combined_races)
+        labels = ("両方的中", "2車単のみ", "3連複のみ", "両方不的中")
+        summary_cross = pd.DataFrame([{"判定": label, "レース数": int((cross_df["判定"] == label).sum())} for label in labels])
+        show_full_table(summary_cross)
+        n_cross = len(cross_df)
+        hit_cross = int((cross_df["判定"] != "両方不的中").sum())
+        investment_cross = int(cross_df["投資額"].sum())
+        return_cross = int(cross_df["払戻合計"].sum())
+        st.write(f"併用的中：{hit_cross}/{n_cross}R（{pct(hit_cross, n_cross)}%）｜投資：{investment_cross:,}円｜払戻：{return_cross:,}円｜収支：{return_cross-investment_cross:+,}円｜回収率：{pct(return_cross, investment_cross)}%")
+        streak = max_streak = 0
+        for hit in (cross_df["判定"] != "両方不的中"):
+            streak = 0 if hit else streak + 1
+            max_streak = max(max_streak, streak)
+        st.write(f"最大連続不的中：{max_streak}R（入力順。対象外レースは含めません）")
+        show_full_table(cross_df.assign(**{"2車単的中": cross_df["2車単的中"].map({True:"○",False:"×"}), "④3連複的中": cross_df["④3連複的中"].map({True:"○",False:"×"})}))
+        st.download_button("併用検証レース別CSV", data=cross_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_exacta_trio_overlap.csv", mime="text/csv")
+    else:
+        st.info("両評価と着順が揃った日次データがありません。")
 
     st.subheader("印着内率【累積】")
     for group in GROUP_MARKS:
