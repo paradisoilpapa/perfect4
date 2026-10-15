@@ -475,6 +475,7 @@ selected_daily_rows = [r for r in selected_daily_rows
 # ============================================================
 daily_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
 daily_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
+daily_epsilon_exacta = {m: blank_bet() for m in ("α", "β", "γ", "Ω")}
 daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
 daily_quinella = {name: blank_bet() for name in ('◎－○', '◎－▲', '◎－△', '◎－×', '◎－無印合計', '◎－β', '◎－ε')}
 quinella_missing_payouts = 0
