@@ -180,7 +180,7 @@ def _empty_race(i):
     return {"race": str(i), "normal": "", "alpha": "", "finish": "",
             "pay": 0, "quinella_pay": 0,
             "wide_entries": [["", 0] for _ in range(3)],
-            "field_size": 7, "exclude": False, "girls": False}
+            "field_size": 7, "exclude": False, "girls": False, "session": "デイ"}
 
 if "velovi_saved_daily_50" not in st.session_state:
     _prior = [_empty_race(i) for i in range(1, 101)]
@@ -211,12 +211,15 @@ with tab_daily:
             quinella_pay = c5.number_input("2車複払戻（100円）", min_value=0, value=int(old["quinella_pay"]), step=10, key=f"p{page}_pay2f_{i}")
             pay = c5.number_input("2車単払戻", min_value=0, value=int(old["pay"]), step=10, key=f"p{page}_pay2t_{i}")
             field_size = c6.selectbox("車数", [7, 6], index=0 if int(old["field_size"]) == 7 else 1, key=f"p{page}_field_size_{i}")
+            session_options = ("モーニング", "デイ", "ナイター", "ミッドナイト")
+            session_value = old.get("session", "デイ")
+            session = c6.selectbox("開催時間帯", session_options, index=session_options.index(session_value) if session_value in session_options else 1, key=f"p{page}_session_{i}")
             girls = c7.checkbox("ガールズ", value=bool(old.get("girls", False)), key=f"p{page}_girls_{i}")
             exclude = c7.checkbox("集計除外", value=bool(old["exclude"]), key=f"p{page}_exclude_{i}")
             page_rows.append({"race": rid, "normal": normal, "alpha": alpha,
                 "finish": finish, "pay": int(pay),
                 "quinella_pay": int(quinella_pay), "wide_entries": old.get("wide_entries", [["", 0] for _ in range(3)]),
-                "field_size": int(field_size), "exclude": bool(exclude), "girls": bool(girls)})
+                "field_size": int(field_size), "exclude": bool(exclude), "girls": bool(girls), "session": session})
             st.divider()
         submitted_50 = st.form_submit_button("この50Rを反映")
     if submitted_50:
@@ -447,10 +450,12 @@ with tab_result:
     category = st.radio("集計区分", ("男子（通常）", "ガールズ", "全レース"),
                         horizontal=True, key="velovi_result_category")
     st.caption("ガールズにチェックしたレースだけをガールズ集計へ。未チェックは男子として扱います。")
+    session_category = st.radio("開催区分", ("通常開催", "ミッドナイト", "全開催"), horizontal=True, key="velovi_result_session")
+    st.caption("通常開催＝モーニング・デイ・ナイター。開催時間帯が未登録の旧データはデイ扱いです。")
 
 # 引継ぎの過去数値には男女区分がないため、区分別集計には絶対に混ぜない。
 # 全レースを選んだときのみ従来どおり引継ぎを合算する。
-if category != "全レース":
+if category != "全レース" or session_category != "全開催":
     carry_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
     carry_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
     carry_unmarked = {name: blank_unmarked() for name in carry_unmarked}
@@ -461,6 +466,9 @@ if category != "全レース":
 selected_daily_rows = [r for r in daily_rows
                        if category == "全レース" or
                        bool(r.get("girls", False)) == (category == "ガールズ")]
+selected_daily_rows = [r for r in selected_daily_rows
+                       if session_category == "全開催" or
+                       (r.get("session", "デイ") == "ミッドナイト") == (session_category == "ミッドナイト")]
 
 # ============================================================
 # C. 日次集計（除外・部分入力・払い戻しチェック）
@@ -773,9 +781,9 @@ total_epsilon_exacta = {
 
 with tab_result:
     st.subheader(f"印着内率【{category}】")
-    if category != "全レース":
-        st.info("この区分の成績はレース別入力のみから集計しています。男女区分のない過去引継ぎ値は含めていません。")
-    st.caption(f"選択区分の有効入力：通常{valid_races['通常']}R／妙味{valid_races['妙味']}R・除外{excluded_races}R。過去引継ぎは全レース表示時のみ加算。")
+    if category != "全レース" or session_category != "全開催":
+        st.info("この区分の成績はレース別入力のみから集計しています。区分のない過去引継ぎ値は含めていません。")
+    st.caption(f"選択区分の有効入力：通常{valid_races['通常']}R／妙味{valid_races['妙味']}R・除外{excluded_races}R。過去引継ぎは全レース・全開催表示時のみ加算。")
     for group in GROUP_MARKS:
         st.markdown(f"**{group}評価**")
         show_full_table(mark_frame(group, total_mark_records).style.format({
@@ -833,4 +841,4 @@ with tab_result:
         pd.DataFrame([compact_result(f"α→{m}", total_bet_records["妙味"][("α", m)]) for m in ("β", "γ", "ε", "Ω")]).assign(分類="2車単α"),
         pd.DataFrame(epsilon_quinella).assign(分類="2車複ε"),
         pd.DataFrame([compact_result(f"ε→{m}", total_epsilon_exacta[m]) for m in ("α", "β", "γ", "Ω")]).assign(分類="2車単ε"),
-    ], ignore_index=True).to_csv(index=False).encode("utf-8-sig"), file_name={"男子（通常）":"velovi_men_results.csv", "ガールズ":"velovi_girls_results.csv", "全レース":"velovi_all_results.csv"}[category], mime="text/csv")
+    ], ignore_index=True).to_csv(index=False).encode("utf-8-sig"), file_name=f"velovi_{category}_{session_category}_results.csv", mime="text/csv")
