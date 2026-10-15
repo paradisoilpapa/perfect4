@@ -211,9 +211,10 @@ with tab_daily:
             quinella_pay = c5.number_input("2車複払戻（100円）", min_value=0, value=int(old["quinella_pay"]), step=10, key=f"p{page}_pay2f_{i}")
             pay = c5.number_input("2車単払戻", min_value=0, value=int(old["pay"]), step=10, key=f"p{page}_pay2t_{i}")
             field_size = c6.selectbox("車数", [7, 6], index=0 if int(old["field_size"]) == 7 else 1, key=f"p{page}_field_size_{i}")
-            session_options = ("モーニング", "デイ", "ナイター", "ミッドナイト")
+            # ミッドナイトだけチェック式にする。旧JSONの開催時間帯も読み取る。
             session_value = old.get("session", "デイ")
-            session = c6.selectbox("開催時間帯", session_options, index=session_options.index(session_value) if session_value in session_options else 1, key=f"p{page}_session_{i}")
+            midnight = c7.checkbox("ミッドナイト", value=(session_value == "ミッドナイト"), key=f"p{page}_midnight_{i}")
+            session = "ミッドナイト" if midnight else (session_value if session_value in ("モーニング", "デイ", "ナイター") else "デイ")
             girls = c7.checkbox("ガールズ", value=bool(old.get("girls", False)), key=f"p{page}_girls_{i}")
             exclude = c7.checkbox("集計除外", value=bool(old["exclude"]), key=f"p{page}_exclude_{i}")
             page_rows.append({"race": rid, "normal": normal, "alpha": alpha,
@@ -451,7 +452,7 @@ with tab_result:
                         horizontal=True, key="velovi_result_category")
     st.caption("ガールズにチェックしたレースだけをガールズ集計へ。未チェックは男子として扱います。")
     session_category = st.radio("開催区分", ("通常開催", "ミッドナイト", "全開催"), horizontal=True, key="velovi_result_session")
-    st.caption("通常開催＝モーニング・デイ・ナイター。開催時間帯が未登録の旧データはデイ扱いです。")
+    st.caption("入力時に『ミッドナイト』へチェックしたレースだけを分離します。未チェックは通常開催です。旧データの開催区分も引き継ぎます。")
 
 # 引継ぎの過去数値には男女区分がないため、区分別集計には絶対に混ぜない。
 # 全レースを選んだときのみ従来どおり引継ぎを合算する。
