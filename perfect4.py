@@ -365,7 +365,7 @@ with tab_carry:
         "妙味評価はα軸の成績を新規入力。旧版の他の2車単は転記不要です。"
         "引継ぎ対象Nは各印・買い目ごとに入力できます。"
     )
-    st.caption("前日までの対象R・購入点数・的中数・払戻合計を入力します。無印は順位なしで一括集計します。")
+    st.caption("前日までの対象R・的中数・払戻合計を入力します。1R1点の買い目は購入点数を自動計算します。")
     with st.form("carryover_form"):
         for group, marks in GROUP_MARKS.items():
             st.markdown(f"### {group}評価｜印別 入賞回数（引継ぎ）")
@@ -403,21 +403,30 @@ with tab_carry:
                     "H": sum(r["H"] for r in rows), "SUM": sum(r["SUM"] for r in rows),
                     "KSUM": sum(r["KSUM"] or r["N"] for r in rows)}
 
-        def carry_entry(label, key, legacy=None, points=None):
+        def carry_entry(label, key, legacy=None, points=None, multi=False):
             legacy = legacy or blank_bet()
             n_default = legacy["N"]
             k_default = legacy["KSUM"] or (n_default * points if points else n_default)
-            c = st.columns([2.3, 1, 1, 1, 1.3])
-            c[0].markdown(f"**{label}**")
-            n = c[1].number_input("対象R", min_value=0, value=n_default, key=key+"_n", label_visibility="collapsed")
-            k = c[2].number_input("購入点数", min_value=0, value=k_default, key=key+"_points", label_visibility="collapsed")
-            h = c[3].number_input("的中数", min_value=0, value=legacy["H"], key=key+"_h", label_visibility="collapsed")
-            v = c[4].number_input("払戻合計", min_value=0, value=legacy["SUM"], step=10, key=key+"_sum", label_visibility="collapsed")
+            if multi:
+                c = st.columns([2.3, 1, 1, 1, 1.3])
+                c[0].markdown(f"**{label}**")
+                n = c[1].number_input("対象R", min_value=0, value=n_default, key=key+"_n", label_visibility="collapsed")
+                k = c[2].number_input("購入点数", min_value=0, value=k_default, key=key+"_points", label_visibility="collapsed")
+                h = c[3].number_input("的中数", min_value=0, value=legacy["H"], key=key+"_h", label_visibility="collapsed")
+                v = c[4].number_input("払戻合計", min_value=0, value=legacy["SUM"], step=10, key=key+"_sum", label_visibility="collapsed")
+            else:
+                c = st.columns([2.3, 1, 1, 1.3])
+                c[0].markdown(f"**{label}**")
+                n = c[1].number_input("対象R", min_value=0, value=n_default, key=key+"_n", label_visibility="collapsed")
+                k = int(n)
+                h = c[2].number_input("的中数", min_value=0, value=legacy["H"], key=key+"_h", label_visibility="collapsed")
+                v = c[3].number_input("払戻合計", min_value=0, value=legacy["SUM"], step=10, key=key+"_sum", label_visibility="collapsed")
             return {"N":int(n), "KSUM":int(k), "H":int(h), "SUM":int(v)}
 
-        def header():
-            c = st.columns([2.3, 1, 1, 1, 1.3])
-            for col, name in zip(c, ("買い目", "対象R", "購入点数", "的中数", "払戻合計")):
+        def header(multi=False):
+            labels = ("買い目", "対象R", "購入点数", "的中数", "払戻合計") if multi else ("買い目", "対象R", "的中数", "払戻合計")
+            c = st.columns([2.3, 1, 1, 1, 1.3] if multi else [2.3, 1, 1, 1.3])
+            for col, name in zip(c, labels):
                 col.markdown(f"**{name}**")
 
         for group, marks in GROUP_MARKS.items():
@@ -432,12 +441,13 @@ with tab_carry:
                     f"{axis}→{other}", f"unified_2t_{group}_{other}", legacy)
             # 妙味α→無印も同じ表示形式で引継ぎ可能
             if group == "通常":
+                st.caption("◎→無印のみ複数点集計のため購入点数を入力します。")
                 legacy = merged_legacy_unmarked(["unmarked_"+field for field in ()]) if False else {
                     "N":max(old_value("unmarked_n_◎→無印1"), old_value("unmarked_n_◎→無印2")),
                     "H":old_value("unmarked_h_◎→無印1")+old_value("unmarked_h_◎→無印2"),
                     "SUM":old_value("unmarked_sum_◎→無印1")+old_value("unmarked_sum_◎→無印2"),
                     "KSUM":old_value("unmarked_n_◎→無印1")+old_value("unmarked_n_◎→無印2")}
-                carry_unmarked["◎→無印"] = carry_entry("◎→無印", "unified_2t_normal_unmarked", legacy)
+                carry_unmarked["◎→無印"] = carry_entry("◎→無印", "unified_2t_normal_unmarked", legacy, multi=True)
 
         st.markdown("### 2車複｜通常評価（◎軸）")
         header()
@@ -451,7 +461,7 @@ with tab_carry:
                 elif other in ("○", "▲", "△", "×"):
                     named = old_record(f"carry_qall_n_◎_{other}")
             carry_quinella_named["◎－無印合計" if other == "無印" else label] = carry_entry(
-                label, "unified_2f_normal_"+other, named)
+                label, "unified_2f_normal_"+other, named, multi=(other == "無印"))
 
         st.markdown("### 2車複｜妙味評価（α軸）")
         header()
@@ -461,7 +471,7 @@ with tab_carry:
             else:
                 legacy = old_record(f"carry_qall_v_α_{other}")
             carry_quinella_all["妙味"][("α",other)] = carry_entry(
-                f"α－{other}", "unified_2f_value_"+other, legacy)
+                f"α－{other}", "unified_2f_value_"+other, legacy, multi=(other == "無印"))
         st.markdown("### 2車単｜妙味評価（ε軸・過去分引継ぎ）")
         st.caption("ε軸の過去成績は、既存のα軸集計からは復元できません。確認できる過去データだけ入力してください。")
         header()
@@ -469,9 +479,9 @@ with tab_carry:
             carry_epsilon_exacta[other] = carry_entry(
                 f"ε→{other}", f"epsilon_carry_2t_{other}")
         st.markdown("### 3連複｜▲1車軸4方式＋4車BOX（過去分引継ぎ）")
-        header()
+        header(multi=True)
         for idx, name in enumerate(TRIO_PATTERNS, 1):
-            carry_trio[name] = carry_entry(name, f"trio2_carry_{idx}")
+            carry_trio[name] = carry_entry(name, f"trio2_carry_{idx}", multi=True)
         st.form_submit_button("前日までの集計を反映")
     st.download_button(
         "日次＋引継ぎをまとめてバックアップ（JSON）",
