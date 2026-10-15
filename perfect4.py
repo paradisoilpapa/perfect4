@@ -257,6 +257,7 @@ daily_quinella_labels = ('◎－○', '◎－▲', '◎－△', '◎－×', '◎
 carry_quinella_all = {g:{} for g in GROUP_MARKS}
 carry_quinella_named = {}
 carry_epsilon_exacta = {m: blank_bet() for m in ("α", "β", "γ", "Ω")}
+carry_epsilon_quinella = {m: blank_bet() for m in ("β", "γ", "Ω")}
 
 # 保存・復元はセッション外でも使える明示的なJSONバックアップで行う。
 # Streamlit Cloudではローカルファイルの永続性を保証できないため、
@@ -431,6 +432,13 @@ with tab_carry:
                     "KSUM":old_value("unmarked_n_◎→無印1")+old_value("unmarked_n_◎→無印2")}
                 carry_unmarked["◎→無印"] = carry_entry("◎→無印", "unified_2t_normal_unmarked", legacy, multi=True)
 
+        st.markdown("### 2車複｜妙味評価（ε軸・過去分引継ぎ）")
+        st.caption("ε－αは上のα－εと同一車券のため、そちらの引継ぎ値を共有します。")
+        header()
+        for other in ("β", "γ", "Ω"):
+            carry_epsilon_quinella[other] = carry_entry(
+                f"ε－{other}", f"epsilon_carry_2f_{other}")
+
         st.markdown("### 2車単｜妙味評価（ε軸・過去分引継ぎ）")
         st.caption("ε軸の過去成績は、既存のα軸集計からは復元できません。確認できる過去データだけ入力してください。")
         header()
@@ -464,6 +472,7 @@ if category != "全レース" or session_category != "全開催":
     carry_quinella_all = {g: {} for g in GROUP_MARKS}
     carry_quinella_named = {}
     carry_epsilon_exacta = {m: blank_bet() for m in ("α", "β", "γ", "Ω")}
+    carry_epsilon_quinella = {m: blank_bet() for m in ("β", "γ", "Ω")}
 
 selected_daily_rows = [r for r in daily_rows
                        if category == "全レース" or
@@ -743,6 +752,13 @@ quinella_all_total = {g:{} for g in GROUP_MARKS}
 for g in GROUP_MARKS:
     for pair in set(quinella_all_records[g]) | set(carry_quinella_all[g]):
         quinella_all_total[g][pair] = add_records(quinella_all_records[g].get(pair, blank_bet()), carry_quinella_all[g].get(pair, blank_bet()), ("N","H","SUM","KSUM"))
+# ε軸2車複の引継ぎを累積に反映。α－εは既存のα軸入力を共用。
+# 組み合わせキーは全組み合わせ集計と同じ並び順に揃える。
+for other, pair in (("β", ("β", "ε")), ("γ", ("γ", "ε")), ("Ω", ("ε", "Ω"))):
+    quinella_all_total["妙味"][pair] = add_records(
+        quinella_all_total["妙味"].get(pair, blank_bet()),
+        carry_epsilon_quinella[other], ("N", "H", "SUM", "KSUM"))
+
 # 「全21組」と「記号別比較」のどちらに前日分を入力しても◎軸累積へ反映。
 # 同一買い目の二重加算を防止するため、記号別比較が入力済みなら優先する。
 def sum_bets(records):
