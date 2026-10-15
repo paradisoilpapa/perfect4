@@ -297,6 +297,7 @@ daily_quinella_labels = ('◎－○', '◎－▲', '◎－△', '◎－×', '◎
 carry_quinella_all = {g:{} for g in GROUP_MARKS}
 carry_quinella_named = {}
 carry_trio = {name: blank_bet() for name in TRIO_PATTERNS}
+carry_epsilon_exacta = {m: blank_bet() for m in ("α", "β", "γ", "Ω")}
 
 # 保存・復元はセッション外でも使える明示的なJSONバックアップで行う。
 # Streamlit Cloudではローカルファイルの永続性を保証できないため、
@@ -304,7 +305,7 @@ carry_trio = {name: blank_bet() for name in TRIO_PATTERNS}
 CARRY_KEY_PREFIXES = (
     "carry_mark_", "alpha_carry_mark_", "carry_", "pair_carry_",
     "alpha_carry_", "unmarked_", "wide_carry_", "carry_qall_",
-    "carry_qnamed_", "carry_wextra_", "unified_", "trio2_carry_",
+    "carry_qnamed_", "carry_wextra_", "unified_", "trio2_carry_", "epsilon_carry_",
 )
 
 
@@ -461,6 +462,12 @@ with tab_carry:
                 legacy = old_record(f"carry_qall_v_α_{other}")
             carry_quinella_all["妙味"][("α",other)] = carry_entry(
                 f"α－{other}", "unified_2f_value_"+other, legacy)
+        st.markdown("### 2車単｜妙味評価（ε軸・過去分引継ぎ）")
+        st.caption("ε軸の過去成績は、既存のα軸集計からは復元できません。確認できる過去データだけ入力してください。")
+        header()
+        for other in ("α", "β", "γ", "Ω"):
+            carry_epsilon_exacta[other] = carry_entry(
+                f"ε→{other}", f"epsilon_carry_2t_{other}")
         st.markdown("### 3連複｜▲1車軸4方式＋4車BOX（過去分引継ぎ）")
         header()
         for idx, name in enumerate(TRIO_PATTERNS, 1):
@@ -483,6 +490,7 @@ daily_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
 daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
 daily_trio = {name: blank_bet() for name in TRIO_PATTERNS}
 daily_axis_trio = {name: blank_bet() for name in AXIS_TRIO_COMPARE}
+daily_epsilon_exacta = {m: blank_bet() for m in ("α", "β", "γ", "Ω")}
 FIVE_WAYS = ("2車複 α－βεΩ（3点）", "2車複 α－εΩ（2点）", "3連複 ◎軸", "3連複 ε軸", "3連複 ▲軸（比較用）")
 daily_five_ways = {name: blank_bet() for name in FIVE_WAYS}
 five_way_details = []
@@ -569,6 +577,17 @@ for entry in daily_rows:
                 hits.append(f"{a}→{b}")
                 if payout <= 0:
                     warnings.append(f"R{rid}: {group} {a}→{b} 的中ですが払戻が0です。")
+        if group == "妙味" and "ε" in marks:
+            for other, rec in daily_epsilon_exacta.items():
+                if other not in marks or marks[other] == marks["ε"]:
+                    continue
+                rec["N"] += 1
+                rec["KSUM"] += 1
+                if finish[0] == marks["ε"] and finish[1] == marks[other]:
+                    rec["H"] += 1
+                    rec["SUM"] += payout
+                    if payout <= 0:
+                        warnings.append(f"R{rid}: ε→{other} 的中ですが2車単払戻が未入力です。")
         detail[f"{group}的中"] = " / ".join(hits) if hits else "なし"
         if group == "通常":
             # 5印のあるレースだけ、残る車番を無印として確定する。
@@ -868,135 +887,71 @@ def compact_result(name, rec):
 
 total_trio = {name: add_records(carry_trio[name], daily_trio[name], ("N", "H", "SUM", "KSUM")) for name in TRIO_PATTERNS}
 
+# ε軸2車単は独立集計。2車複はα軸全組み合わせから同一車券を再利用。
+total_epsilon_exacta = {
+    m: add_records(carry_epsilon_exacta[m], daily_epsilon_exacta[m],
+                   ("N", "H", "SUM", "KSUM"))
+    for m in ("α", "β", "γ", "Ω")
+}
+
 with tab_result:
-    st.subheader("累積成績｜◎軸の結果")
-    st.caption(f"本日有効：通常{valid_races['通常']}R／妙味{valid_races['妙味']}R・除外{excluded_races}R。過去引継ぎと本日入力を合算。1点100円換算。")
-
-    # 2車単は通常◎の1着固定、2車複は通常◎を含む組み合わせだけ。
-    exacta_diamond = sum_bets(
-        total_bet_records["通常"][("◎", m)] for m in GROUP_MARKS["通常"][1:]
-    )
-    # 2車複の過去引継ぎは「記号別比較」側にも存在する。
-    # 全21組の引継ぎが未入力でも、◎軸の記号別引継ぎから累積を表示する。
-    # 引継ぎは記号別入力優先、未入力時だけ21組を参照し二重加算を防ぐ。
-    quinella_diamond = sum_bets(
-        quinella_named_total[label] for label in
-        ("◎－○", "◎－▲", "◎－△", "◎－×", "◎－無印合計")
-    )
-    # 妙味評価はα軸の買い目別記録を使用。2車複は21組の引継ぎと日次入力を合算。
-    exacta_alpha = sum_bets(
-        total_bet_records["妙味"][("α", m)] for m in GROUP_MARKS["妙味"][1:]
-    )
-    quinella_alpha = sum_bets(
-        quinella_all_total["妙味"][("α", m)] for m in GROUP_MARKS["妙味"][1:]
-    )
-    primary = pd.DataFrame([
-        compact_result("2車単 ◎→全", exacta_diamond),
-        compact_result("2車単 α→全", exacta_alpha),
-        compact_result("2車複 ◎－全", quinella_diamond),
-        compact_result("2車複 α－全", quinella_alpha),
-    ])
-    show_full_table(style_roi(primary))
-    st.caption("通常◎軸と妙味α軸を別々に集計。2車単は各4点、2車複のα軸は印相手4点。過去分は対応する引継ぎ欄を反映します。")
-
-    st.subheader("2車単｜◎軸・買い目別【累積】")
-    # ◎以外の軸→全は作らず、個別買い目は常時一覧表示。
-    exacta_rows = [compact_result(f"◎→{m}", total_bet_records["通常"][("◎", m)])
-                   for m in GROUP_MARKS["通常"][1:]]
-    exacta_rows.append(compact_result("◎→無印", total_unmarked["◎→無印"]))
-    show_full_table(style_roi(pd.DataFrame(exacta_rows)))
-
-    st.subheader("2車複｜◎軸・買い目別【累積】")
-    q_df = pd.DataFrame([compact_result(name, quinella_named_total[name])
-                         for name in daily_quinella_labels])
-    show_full_table(style_roi(q_df))
-    if quinella_missing_payouts:
-        st.warning(f"2車複：的中{quinella_missing_payouts}件で払戻未入力。回収率は暫定値です。")
-
-    st.subheader("2車単｜妙味評価 α軸・買い目別【累積】")
-    value_exacta_rows = [compact_result(f"α→{m}", total_bet_records["妙味"][("α", m)])
-                          for m in GROUP_MARKS["妙味"][1:]]
-    show_full_table(style_roi(pd.DataFrame(value_exacta_rows)))
-
-    st.subheader("2車複｜妙味評価 α軸・買い目別【累積】")
-    value_quinella_rows = [compact_result(f"α－{m}", quinella_all_total["妙味"][("α", m)])
-                            for m in GROUP_MARKS["妙味"][1:]]
-    show_full_table(style_roi(pd.DataFrame(value_quinella_rows)))
-    st.caption("妙味2車複は『全組み合わせ（過去分引継ぎ）』の妙味評価欄を使用します。未入力の過去分は0として扱います。")
-
-    st.subheader("3連複｜▲1車軸4方式＋4車BOX【累積】")
-    st.caption("▲1車軸4方式と▲◎○αの4車BOX（最大4点）。同一車番の重複は除き、成立点数で投資額を計算。両評価の5印入力が必要です。")
-    trio_df = pd.DataFrame([compact_result(name, total_trio[name]) for name in TRIO_PATTERNS])
-    show_full_table(style_roi(trio_df))
-    if trio_missing:
-        st.warning(f"3連複の的中{trio_missing}件で払戻未入力です。回収率は暫定値です。")
-    st.download_button("3連複5方式 集計CSV", data=trio_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_five_patterns.csv", mime="text/csv")
-
-    st.subheader("2車複2方式＋3連複3方式｜5方式同一レース比較【日次】")
-    st.caption("両方の印5車と着順が揃うレースだけを同一母集団で比較。各点100円。2車複は2車複払戻、3連複は3連複払戻を使用。過去引継ぎ合算値は含みません。")
-    five_df = pd.DataFrame([compact_result(name, daily_five_ways[name]) for name in FIVE_WAYS])
-    show_full_table(style_roi(five_df))
-    st.download_button("5方式比較CSV", data=five_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_five_ways.csv", mime="text/csv")
-    if five_way_details:
-        with st.expander("5方式のレース別的中・投資・払戻を確認"):
-            five_detail_df = pd.DataFrame(five_way_details)
-            show_full_table(five_detail_df)
-            st.download_button("5方式レース別CSV", data=five_detail_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_five_ways_details.csv", mime="text/csv")
-
-    st.subheader("3連複｜基本▲軸と◎・○・α・ε軸の同条件比較【日次】")
-    st.caption("基本▲－◎○α－◎○α。各軸とも最大3点、重複車番は除外。過去引継ぎの合算値では別軸の的中を復元できないため、日次レース入力のみで比較します。")
-    axis_compare_df = pd.DataFrame([compact_result(name, daily_axis_trio[name]) for name in AXIS_TRIO_COMPARE])
-    show_full_table(style_roi(axis_compare_df))
-    st.download_button("3連複5軸比較CSV", data=axis_compare_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_trio_axis_comparison.csv", mime="text/csv")
-
-    st.subheader("α頭2車単4点 × ④3連複｜併用検証【日次】")
-    st.caption("レース単位の重複・補完を検証。過去の引継ぎ集計には的中の同時性が記録されていないため、日次入力データだけが対象です。")
-    if combined_races:
-        cross_df = pd.DataFrame(combined_races)
-        labels = ("両方的中", "2車単のみ", "3連複のみ", "両方不的中")
-        summary_cross = pd.DataFrame([{"判定": label, "レース数": int((cross_df["判定"] == label).sum())} for label in labels])
-        show_full_table(summary_cross)
-        n_cross = len(cross_df)
-        hit_cross = int((cross_df["判定"] != "両方不的中").sum())
-        investment_cross = int(cross_df["投資額"].sum())
-        return_cross = int(cross_df["払戻合計"].sum())
-        st.write(f"併用的中：{hit_cross}/{n_cross}R（{pct(hit_cross, n_cross)}%）｜投資：{investment_cross:,}円｜払戻：{return_cross:,}円｜収支：{return_cross-investment_cross:+,}円｜回収率：{pct(return_cross, investment_cross)}%")
-        streak = max_streak = 0
-        for hit in (cross_df["判定"] != "両方不的中"):
-            streak = 0 if hit else streak + 1
-            max_streak = max(max_streak, streak)
-        st.write(f"最大連続不的中：{max_streak}R（入力順。対象外レースは含めません）")
-        show_full_table(cross_df.assign(**{"2車単的中": cross_df["2車単的中"].map({True:"○",False:"×"}), "④3連複的中": cross_df["④3連複的中"].map({True:"○",False:"×"})}))
-        st.download_button("併用検証レース別CSV", data=cross_df.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_exacta_trio_overlap.csv", mime="text/csv")
-    else:
-        st.info("両評価と着順が揃った日次データがありません。")
-
     st.subheader("印着内率【累積】")
+    st.caption(f"本日有効：通常{valid_races['通常']}R／妙味{valid_races['妙味']}R・除外{excluded_races}R。過去引継ぎ＋本日入力。")
     for group in GROUP_MARKS:
         st.markdown(f"**{group}評価**")
         show_full_table(mark_frame(group, total_mark_records).style.format({
             "1着率%": "{:.1f}", "連対率%": "{:.1f}", "印着内率%": "{:.1f}"
         }, na_rep="—"))
 
-    summary_df = pd.DataFrame([set_summary(g, total_bet_records) for g in GROUP_MARKS])
-    total_unmarked["◎→×"] = dict(total_bet_records["通常"][("◎", "×")])
+    st.subheader("2車単｜◎軸・買い目別【累積】")
+    normal_exacta_rows = [compact_result(f"◎→{m}", total_bet_records["通常"][("◎", m)])
+                         for m in ("○", "▲", "△", "×")]
+    normal_exacta_rows.append(compact_result("◎→無印", total_unmarked["◎→無印"]))
+    show_full_table(style_roi(pd.DataFrame(normal_exacta_rows)))
 
+    st.subheader("2車複｜◎軸・買い目別【累積】")
+    show_full_table(style_roi(pd.DataFrame([
+        compact_result(name, quinella_named_total[name]) for name in daily_quinella_labels
+    ])))
 
-    with st.expander("本日分だけの成績", expanded=False):
-        st.markdown("**3連複5方式・本日分**")
-        show_full_table(style_roi(pd.DataFrame([compact_result(name, daily_trio[name]) for name in TRIO_PATTERNS])))
-        today_df = pd.DataFrame([set_summary(group, daily_bet_records) for group in GROUP_MARKS])
-        show_full_table(style_roi(today_df))
-        show_full_table(style_roi(unmarked_frame(daily_unmarked)))
-        for group in GROUP_MARKS:
-            st.markdown(f"**{group}評価｜本日の印着内率**")
-            show_full_table(mark_frame(group, daily_mark_records))
+    st.subheader("2車単｜妙味評価 α軸・買い目別【累積】")
+    show_full_table(style_roi(pd.DataFrame([
+        compact_result(f"α→{m}", total_bet_records["妙味"][("α", m)])
+        for m in ("β", "γ", "ε", "Ω")
+    ])))
+
+    st.subheader("2車複｜妙味評価 α軸・買い目別【累積】")
+    show_full_table(style_roi(pd.DataFrame([
+        compact_result(f"α－{m}", quinella_all_total["妙味"].get(("α", m), blank_bet()))
+        for m in ("β", "γ", "ε", "Ω")
+    ])))
+
+    st.subheader("2車単｜妙味評価 ε軸・買い目別【累積】")
+    show_full_table(style_roi(pd.DataFrame([
+        compact_result(f"ε→{m}", total_epsilon_exacta[m])
+        for m in ("α", "β", "γ", "Ω")
+    ])))
+
+    st.subheader("2車複｜妙味評価 ε軸・買い目別【累積】")
+    st.caption("ε－αはα－εと同一車券。既存の2車複全組み合わせから参照し、二重集計しません。過去分は既存引継ぎのある組み合わせのみ反映されます。")
+    epsilon_quinella = []
+    for m in ("α", "β", "γ", "Ω"):
+        pair = ("α", "ε") if m == "α" else (m, "ε") if m in ("β", "γ") else ("ε", "Ω")
+        epsilon_quinella.append(compact_result(
+            f"ε－{m}", quinella_all_total["妙味"].get(pair, blank_bet())
+        ))
+    show_full_table(style_roi(pd.DataFrame(epsilon_quinella)))
 
     if warnings:
         st.warning("\n".join(warnings[:25]) + ("\n…" if len(warnings) > 25 else ""))
     if race_details:
         with st.expander("本日のレース別判定を確認"):
             show_full_table(pd.DataFrame(race_details).fillna(""))
-
-    st.divider()
-    st.download_button("◎・α軸｜2車単・2車複 集計CSV", data=primary.to_csv(index=False).encode("utf-8-sig"), file_name="velovi_diamond_axis.csv", mime="text/csv")
+    st.download_button("表示7表の集計CSV", data=pd.concat([
+        pd.DataFrame(normal_exacta_rows).assign(分類="2車単◎"),
+        pd.DataFrame([compact_result(name, quinella_named_total[name]) for name in daily_quinella_labels]).assign(分類="2車複◎"),
+        pd.DataFrame([compact_result(f"α→{m}", total_bet_records["妙味"][("α", m)]) for m in ("β", "γ", "ε", "Ω")]).assign(分類="2車単α"),
+        pd.DataFrame([compact_result(f"α－{m}", quinella_all_total["妙味"].get(("α", m), blank_bet())) for m in ("β", "γ", "ε", "Ω")]).assign(分類="2車複α"),
+        pd.DataFrame([compact_result(f"ε→{m}", total_epsilon_exacta[m]) for m in ("α", "β", "γ", "Ω")]).assign(分類="2車単ε"),
+        pd.DataFrame(epsilon_quinella).assign(分類="2車複ε"),
+    ], ignore_index=True).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_compact_results.csv", mime="text/csv")
