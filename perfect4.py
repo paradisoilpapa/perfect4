@@ -514,29 +514,6 @@ if category != "全レース" or session_category != "全開催":
     carry_epsilon_exacta = {m: blank_bet() for m in ("α", "β", "γ", "Ω")}
     carry_epsilon_quinella = {m: blank_bet() for m in ("β", "γ", "Ω")}
 
-# 区分別引継ぎを既存の累積レコードに反映。
-for _sid in _scope_ids:
-    _marks, _bet = _scoped_values(_sid)
-    for _g in GROUP_MARKS:
-        for _m in GROUP_MARKS[_g]:
-            carry_mark_records[_g][_m] = add_records(carry_mark_records[_g][_m], _marks[_g][_m], ("N","C1","C2","C3"))
-    for _m in ("○","▲","△","×"):
-        _key=("◎",_m)
-        carry_bet_records["通常"][_key] = add_records(carry_bet_records["通常"][_key], _bet("2車単","◎",_m), ("N","H","SUM","KSUM"))
-    for _m in ("β","γ","ε","Ω"):
-        _key=("α",_m)
-        carry_bet_records["妙味"][_key] = add_records(carry_bet_records["妙味"][_key], _bet("2車単","α",_m), ("N","H","SUM","KSUM"))
-    for _m in ("α","β","γ","Ω"):
-        carry_epsilon_exacta[_m] = add_records(carry_epsilon_exacta[_m], _bet("2車単","ε",_m), ("N","H","SUM","KSUM"))
-    for _m in ("○","▲","△","×","無印","β","ε"):
-        _label="◎－無印合計" if _m == "無印" else "◎－"+_m
-        carry_quinella_named[_label] = add_records(carry_quinella_named.get(_label,blank_bet()), _bet("2車複","◎",_m), ("N","H","SUM","KSUM"))
-    for _m in ("β","γ","ε","Ω"):
-        _pair=("α",_m)
-        carry_quinella_all["妙味"][_pair] = add_records(carry_quinella_all["妙味"].get(_pair,blank_bet()), _bet("2車複","α",_m), ("N","H","SUM","KSUM"))
-    for _m in ("β","γ","Ω"):
-        carry_epsilon_quinella[_m] = add_records(carry_epsilon_quinella[_m], _bet("2車複","ε",_m), ("N","H","SUM","KSUM"))
-
 selected_daily_rows = [r for r in daily_rows
                        if category == "全レース" or
                        bool(r.get("girls", False)) == (category == "ガールズ")]
@@ -566,6 +543,29 @@ for _g, _sid in ((False,"boy_day"),(False,"boy_mid"),(True,"girl_day"),(True,"gi
     if session_category != "全開催" and (session_category == "ミッドナイト") != _sid.endswith("mid"):
         continue
     _scope_ids.append(_sid)
+
+# 区分別引継ぎを既存の累積レコードに反映。
+for _sid in _scope_ids:
+    _marks, _bet = _scoped_values(_sid)
+    for _g in GROUP_MARKS:
+        for _m in GROUP_MARKS[_g]:
+            carry_mark_records[_g][_m] = add_records(carry_mark_records[_g][_m], _marks[_g][_m], ("N","C1","C2","C3"))
+    for _m in ("○","▲","△","×"):
+        _key=("◎",_m)
+        carry_bet_records["通常"][_key] = add_records(carry_bet_records["通常"][_key], _bet("2車単","◎",_m), ("N","H","SUM","KSUM"))
+    for _m in ("β","γ","ε","Ω"):
+        _key=("α",_m)
+        carry_bet_records["妙味"][_key] = add_records(carry_bet_records["妙味"][_key], _bet("2車単","α",_m), ("N","H","SUM","KSUM"))
+    for _m in ("α","β","γ","Ω"):
+        carry_epsilon_exacta[_m] = add_records(carry_epsilon_exacta[_m], _bet("2車単","ε",_m), ("N","H","SUM","KSUM"))
+    for _m in ("○","▲","△","×","無印","β","ε"):
+        _label="◎－無印合計" if _m == "無印" else "◎－"+_m
+        carry_quinella_named[_label] = add_records(carry_quinella_named.get(_label,blank_bet()), _bet("2車複","◎",_m), ("N","H","SUM","KSUM"))
+    for _m in ("β","γ","ε","Ω"):
+        _pair=("α",_m)
+        carry_quinella_all["妙味"][_pair] = add_records(carry_quinella_all["妙味"].get(_pair,blank_bet()), _bet("2車複","α",_m), ("N","H","SUM","KSUM"))
+    for _m in ("β","γ","Ω"):
+        carry_epsilon_quinella[_m] = add_records(carry_epsilon_quinella[_m], _bet("2車複","ε",_m), ("N","H","SUM","KSUM"))
 
 # ============================================================
 # C. 日次集計（除外・部分入力・払い戻しチェック）
