@@ -324,40 +324,41 @@ with tab_carry:
     st.markdown("### 区分別の前日引継ぎ（新方式）")
     st.caption("男子通常・男子ミッドナイト・ガールズ通常・ガールズミッドナイトを別保存。日次入力と同じく2車複→2車単の順です。旧引継ぎとは重複入力しないでください。")
     scope_options = {"男子・通常開催":"boy_day", "男子・ミッドナイト":"boy_mid", "ガールズ・通常開催":"girl_day", "ガールズ・ミッドナイト":"girl_mid"}
-    scope_name = st.selectbox("引継ぎ対象区分", list(scope_options), key="scopedcarry_selector")
-    scope_id = scope_options[scope_name]
-    with st.form("scoped_carry_form_" + scope_id):
-        for group, marks in GROUP_MARKS.items():
-            st.markdown(f"**{group}評価・印着内率**")
-            cols = st.columns([1.1, 1, 1, 1, 1])
-            for col, name in zip(cols, ("印", "対象R", "1着", "2着", "3着")):
-                col.markdown(f"**{name}**")
-            for mark in marks:
-                cols = st.columns([1.1, 1, 1, 1, 1])
-                cols[0].write(mark)
-                for col, field in zip(cols[1:], ("n", "c1", "c2", "c3")):
-                    col.number_input(field, min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_mark_{group}_{mark}_{field}")
-        for ticket_type in ("2車複", "2車単"):
-            for axis, targets in (("◎", ("○", "▲", "△", "×", "無印", "β", "ε")),
-                                  ("α", ("β", "γ", "ε", "Ω")),
-                                  ("ε", ("β", "γ", "Ω")) if ticket_type == "2車複" else ("ε", ("α", "β", "γ", "Ω"))):
-                st.markdown(f"**{ticket_type}｜{axis}軸**")
-                c = st.columns([2, 1, 1, 1, 1])
-                for col, title in zip(c, ("買い目", "対象R", "購入点数", "的中数", "払戻合計")):
-                    col.markdown(f"**{title}**")
-                for target in targets:
-                    label = f"{axis}{'－' if ticket_type == '2車複' else '→'}{target}"
-                    code = f"{ticket_type}_{axis}_{target}"
-                    c = st.columns([2, 1, 1, 1, 1])
-                    c[0].write(label)
-                    c[1].number_input("対象R", min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_n")
-                    if target == "無印":
-                        c[2].number_input("購入点数", min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_points")
-                    else:
-                        c[2].caption("対象Rと同数")
-                    c[3].number_input("的中数", min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_h")
-                    c[4].number_input("払戻合計", min_value=0, step=10, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_sum")
-        st.form_submit_button("この区分の引継ぎを反映")
+    _scope_tabs = st.tabs(list(scope_options))
+    for _scope_tab, (scope_name, scope_id) in zip(_scope_tabs, scope_options.items()):
+        with _scope_tab:
+            with st.form("scoped_carry_form_" + scope_id):
+                for group, marks in GROUP_MARKS.items():
+                    st.markdown(f"**{group}評価・印着内率**")
+                    cols = st.columns([1.1, 1, 1, 1, 1])
+                    for col, name in zip(cols, ("印", "対象R", "1着", "2着", "3着")):
+                        col.markdown(f"**{name}**")
+                    for mark in marks:
+                        cols = st.columns([1.1, 1, 1, 1, 1])
+                        cols[0].write(mark)
+                        for col, field in zip(cols[1:], ("n", "c1", "c2", "c3")):
+                            col.number_input(field, min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_mark_{group}_{mark}_{field}")
+                for ticket_type in ("2車複", "2車単"):
+                    for axis, targets in (("◎", ("○", "▲", "△", "×", "無印", "β", "ε")),
+                                          ("α", ("β", "γ", "ε", "Ω")),
+                                          ("ε", ("β", "γ", "Ω")) if ticket_type == "2車複" else ("ε", ("α", "β", "γ", "Ω"))):
+                        st.markdown(f"**{ticket_type}｜{axis}軸**")
+                        c = st.columns([2, 1, 1, 1, 1])
+                        for col, title in zip(c, ("買い目", "対象R", "購入点数", "的中数", "払戻合計")):
+                            col.markdown(f"**{title}**")
+                        for target in targets:
+                            label = f"{axis}{'－' if ticket_type == '2車複' else '→'}{target}"
+                            code = f"{ticket_type}_{axis}_{target}"
+                            c = st.columns([2, 1, 1, 1, 1])
+                            c[0].write(label)
+                            c[1].number_input("対象R", min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_n")
+                            if target == "無印":
+                                c[2].number_input("購入点数", min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_points")
+                            else:
+                                c[2].caption("対象Rと同数")
+                            c[3].number_input("的中数", min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_h")
+                            c[4].number_input("払戻合計", min_value=0, step=10, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_sum")
+                st.form_submit_button("この区分の引継ぎを反映")
     st.divider()
     with st.expander("従来の区分なし引継ぎ（既存データ互換）"):
         st.caption(
