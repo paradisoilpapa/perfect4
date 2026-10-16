@@ -921,26 +921,17 @@ with tab_result:
             "1着率%": "{:.1f}", "連対率%": "{:.1f}", "印着内率%": "{:.1f}"
         }, na_rep="—"))
 
+    st.markdown("**最終総合評価 εABCD｜日次入力分**")
+    st.caption("独立した最終評価の入力があるレースだけ集計。前日引継ぎの妙味ε軸とは混同しません。")
+    show_full_table(pd.DataFrame([mark_row(m,daily_final_marks[m]) for m in ("ε","A","B","C","D")]))
     st.subheader("2車複｜◎軸・買い目別【累積】")
     show_full_table(style_roi(pd.DataFrame([
         compact_result(name, quinella_named_total[name]) for name in daily_quinella_labels
     ])))
 
-    st.subheader("2車単｜◎軸・買い目別【累積】")
-    normal_exacta_rows = [compact_result(f"◎→{m}", total_bet_records["通常"][("◎", m)])
-                         for m in ("○", "▲", "△", "×")]
-    normal_exacta_rows.append(compact_result("◎→無印", total_unmarked["◎→無印"]))
-    show_full_table(style_roi(pd.DataFrame(normal_exacta_rows)))
-
     st.subheader("2車複｜妙味評価 α軸・買い目別【累積】")
     show_full_table(style_roi(pd.DataFrame([
         compact_result(f"α－{m}", quinella_all_total["妙味"].get(("α", m), blank_bet()))
-        for m in ("β", "γ", "ε", "Ω")
-    ])))
-
-    st.subheader("2車単｜妙味評価 α軸・買い目別【累積】")
-    show_full_table(style_roi(pd.DataFrame([
-        compact_result(f"α→{m}", total_bet_records["妙味"][("α", m)])
         for m in ("β", "γ", "ε", "Ω")
     ])))
 
@@ -954,18 +945,29 @@ with tab_result:
         ))
     show_full_table(style_roi(pd.DataFrame(epsilon_quinella)))
 
+    st.markdown("**2車複｜最終総合評価 ε軸**")
+    show_full_table(style_roi(pd.DataFrame([compact_result(f"ε－{m}",daily_final_2f[m]) for m in "ABCD"])))
+
+    st.subheader("2車単｜◎軸・買い目別【累積】")
+    normal_exacta_rows = [compact_result(f"◎→{m}", total_bet_records["通常"][("◎", m)])
+                         for m in ("○", "▲", "△", "×")]
+    normal_exacta_rows.append(compact_result("◎→無印", total_unmarked["◎→無印"]))
+    show_full_table(style_roi(pd.DataFrame(normal_exacta_rows)))
+
+    st.subheader("2車単｜妙味評価 α軸・買い目別【累積】")
+    show_full_table(style_roi(pd.DataFrame([
+        compact_result(f"α→{m}", total_bet_records["妙味"][("α", m)])
+        for m in ("β", "γ", "ε", "Ω")
+    ])))
+
     st.subheader("2車単｜妙味評価 ε軸・買い目別【累積】")
     show_full_table(style_roi(pd.DataFrame([
         compact_result(f"ε→{m}", total_epsilon_exacta[m])
         for m in ("α", "β", "γ", "Ω")
     ])))
 
-    st.subheader("最終総合評価 εABCD｜日次入力分")
-    st.caption("独立した最終評価の入力があるレースだけ集計。前日引継ぎの妙味ε軸とは混同しません。")
-    show_full_table(pd.DataFrame([mark_row(m,daily_final_marks[m]) for m in ("ε","A","B","C","D")]))
-    for _kind, _records in (("2車複",daily_final_2f),("2車単",daily_final_2t)):
-        st.markdown(f"**{_kind}｜最終ε軸**")
-        show_full_table(style_roi(pd.DataFrame([compact_result(f"ε{'－' if _kind=='2車複' else '→'}{m}",_records[m]) for m in "ABCD"])))
+    st.markdown("**2車単｜最終総合評価 ε軸**")
+    show_full_table(style_roi(pd.DataFrame([compact_result(f"ε→{m}",daily_final_2t[m]) for m in "ABCD"])))
 
     if warnings:
         st.warning("\n".join(warnings[:25]) + ("\n…" if len(warnings) > 25 else ""))
