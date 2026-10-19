@@ -981,6 +981,7 @@ total_epsilon_exacta = {
 # ============================================================
 BOX_LABELS = tuple(GROUP_MARKS["通常"]) + tuple(GROUP_MARKS["妙味"])
 BOX_COMBINATIONS = list(combinations(BOX_LABELS, 4))  # 10C4 = 210
+BOX_COMBINATIONS_3 = list(combinations(BOX_LABELS, 3))  # 10C3 = 120
 
 def _box_race_inputs(rows):
     result = []
@@ -1027,9 +1028,11 @@ def _box_score(combo, races):
             "収支":paid-invested, "回収率%":pct(paid,invested),
             "払戻未入力R":missing}
 
-def _box_ranking(races, minimum):
+def _box_ranking(races, minimum, combinations_to_check=None):
+    if combinations_to_check is None:
+        combinations_to_check = BOX_COMBINATIONS
     result = []
-    for combo in BOX_COMBINATIONS:
+    for combo in combinations_to_check:
         score = _box_score(combo, races)
         if score["対象R"] >= minimum and score["払戻未入力R"] == 0:
             result.append({"BOX":"・".join(combo), "_combo":combo, **score})
@@ -1093,6 +1096,32 @@ with tab_result:
         missing_races=sum(1 for _,_,dividend in box_races if dividend == 0)
         if missing_races:
             st.warning(f"2車複払戻0円の入力が{missing_races}Rあります。的中時の払戻未入力を含むBOXはランキングから除外しています。")
+    st.subheader("2車複｜3車BOX自動探索（全120通り）")
+    st.caption("4車BOX探索を残したまま追加。3印から重複車番を除き、3車3点・2車1点。1車のみは対象外。レース別入力のみを使用します。")
+    if len(box_races) < 2:
+        st.info("探索には2R以上の有効なレース別入力が必要です。")
+    else:
+        rank3 = _box_ranking(box_races, int(min_sample), BOX_COMBINATIONS_3)
+        st.markdown("**全期間の成績順（参考：過去への当てはめ）**")
+        if rank3:
+            cols3 = ["BOX", "対象R", "購入点数", "的中R", "的中率%", "投資額", "払戻合計", "収支", "回収率%"]
+            frame3 = pd.DataFrame(rank3)
+            show_full_table(style_roi(frame3[cols3].head(30)))
+            st.download_button("全120通り・3車BOX集計CSV", data=frame3.drop(columns=["_combo"]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_box_3car_all.csv", mime="text/csv", key="box_search_3car_csv")
+        else:
+            st.info("条件を満たす3車BOXがありません。")
+        train3 = _box_ranking(train, min(int(min_sample), len(train)), BOX_COMBINATIONS_3)
+        st.markdown(f"**前半{len(train)}Rで候補を選び、後半{len(test)}Rで検証**")
+        st.caption("4車BOXと同じ前半割合・最低対象Rを使用。日次入力順が古い→新しい順であることが前提です。")
+        if train3:
+            comparison3 = []
+            for item in train3[:10]:
+                out = _box_score(item["_combo"], test)
+                comparison3.append({"BOX": item["BOX"], "前半回収率%": item["回収率%"], "前半収支": item["収支"], "後半対象R": out["対象R"], "後半購入点数": out["購入点数"], "後半的中R": out["的中R"], "後半収支": out["収支"], "後半回収率%": out["回収率%"], "後半払戻未入力R": out["払戻未入力R"]})
+            show_full_table(pd.DataFrame(comparison3))
+        else:
+            st.info("前半データで条件を満たす3車BOXがありません。")
+        st.caption("3車BOXも全120通りを探索するため、過去の高回収率には偶然の上振れが含まれます。")
     st.subheader("2車複｜◎軸・買い目別【累積】")
     show_full_table(style_roi(pd.DataFrame([
         compact_result(name, quinella_named_total[name]) for name in daily_quinella_labels
