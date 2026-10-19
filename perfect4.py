@@ -976,6 +976,65 @@ total_epsilon_exacta = {
     for m in ("α", "β", "γ", "Ω")
 }
 
+# ============================================================
+# 4車BOX全探索：レース別入力のみ。既存集計・引継ぎには干渉しない。
+# ============================================================
+BOX_LABELS = tuple(GROUP_MARKS["通常"]) + tuple(GROUP_MARKS["妙味"])
+BOX_COMBINATIONS = list(combinations(BOX_LABELS, 4))  # 10C4 = 210
+
+def _box_race_inputs(rows):
+    result = []
+    for row in rows:
+        if row.get("exclude"):
+            continue
+        normal = parse_markline(row.get("normal", ""), "通常")
+        value = parse_markline(row.get("alpha", ""), "妙味")
+        finish = parse_finish(row.get("finish", ""))
+        field = int(row.get("field_size", 7))
+        if len(finish) < 2 or len(set(finish[:2])) != 2:
+            continue
+        if not all(1 <= int(c) <= field for c in finish[:2]):
+            continue
+        # 4印・5印どちらも使用可能。欠損印を含むBOXはそのRを対象外にする。
+        labels = {**normal, **value}
+        if not labels:
+            continue
+        if any(not 1 <= int(car) <= field for car in labels.values()):
+            continue
+        result.append((labels, set(finish[:2]), int(row.get("quinella_pay", 0))))
+    return result
+
+def _box_score(combo, races):
+    n = points = hits = paid = missing = 0
+    for labels, winners, dividend in races:
+        if not all(mark in labels for mark in combo):
+            continue
+        cars = {labels[mark] for mark in combo}
+        k = len(cars) * (len(cars) - 1) // 2
+        if not k:
+            continue
+        n += 1
+        points += k
+        if winners.issubset(cars):
+            hits += 1
+            if dividend > 0:
+                paid += dividend
+            else:
+                missing += 1
+    invested = points * 100
+    return {"対象R":n, "購入点数":points, "的中R":hits,
+            "的中率%":pct(hits,n), "投資額":invested, "払戻合計":paid,
+            "収支":paid-invested, "回収率%":pct(paid,invested),
+            "払戻未入力R":missing}
+
+def _box_ranking(races, minimum):
+    result = []
+    for combo in BOX_COMBINATIONS:
+        score = _box_score(combo, races)
+        if score["対象R"] >= minimum and score["払戻未入力R"] == 0:
+            result.append({"BOX":"・".join(combo), "_combo":combo, **score})
+    return sorted(result, key=lambda x:(x["回収率%"] or -1, x["収支"]), reverse=True)
+
 with tab_result:
     st.subheader(f"印着内率【{category}】")
     if category != "全レース" or session_category != "全開催":
@@ -996,6 +1055,44 @@ with tab_result:
     alt_box_result = compact_result("○・ε・α・γ BOX（可変点数）", daily_alt_box)
     show_full_table(style_roi(pd.DataFrame([box_result, alt_box_result])))
     st.caption(f"◎○αε：対象外{daily_mixed_box_skips}R・的中払戻未入力{daily_mixed_box_missing}R ／ ○εαγ：対象外{daily_alt_box_skips}R・的中払戻未入力{daily_alt_box_missing}R")
+    st.subheader("2車複｜4車BOX自動探索（全210通り）")
+    st.caption("入力済みのレースから全組み合わせを計算。実車番の重複は1車として扱い、1・3・6点で投資額を算出。引継ぎの買い目別合計は含みません。")
+    box_races = _box_race_inputs(selected_daily_rows)
+    if len(box_races) < 2:
+        st.info("探索には2R以上の有効なレース別入力が必要です。")
+    else:
+        col_a, col_b = st.columns(2)
+        min_sample = col_a.number_input("最低対象レース数", min_value=1, max_value=len(box_races), value=min(20, len(box_races)), step=1, key="box_search_min_r")
+        train_pct = col_b.slider("探索用データ割合（前半）", 50, 90, 70, 5, key="box_search_train_pct")
+        all_rank = _box_ranking(box_races, int(min_sample))
+        st.markdown("**全期間の成績順（参考：過去への当てはめ）**")
+        if all_rank:
+            display_cols = ["BOX","対象R","購入点数","的中R","的中率%","投資額","払戻合計","収支","回収率%"]
+            full_frame = pd.DataFrame(all_rank)
+            show_full_table(style_roi(full_frame[display_cols].head(30)))
+            st.download_button("全210通りの集計CSV", data=full_frame.drop(columns=["_combo"]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_box_all_combinations.csv", mime="text/csv", key="box_search_all_csv")
+        else:
+            st.info("条件を満たすBOXがありません。最低対象レース数を減らしてください。")
+        split = max(1, min(len(box_races)-1, int(len(box_races)*train_pct/100)))
+        train, test = box_races[:split], box_races[split:]
+        train_rank = _box_ranking(train, min(int(min_sample),len(train)))
+        st.markdown(f"**前半{len(train)}Rで候補を選び、後半{len(test)}Rで検証**")
+        st.caption("日次入力欄の並び順が古い→新しい順であることが前提です。後半の成績は候補選定に使用しません。")
+        if train_rank:
+            compared=[]
+            for item in train_rank[:10]:
+                out=_box_score(item["_combo"],test)
+                compared.append({"BOX":item["BOX"], "前半回収率%":item["回収率%"], "前半収支":item["収支"],
+                    "後半対象R":out["対象R"], "後半購入点数":out["購入点数"],
+                    "後半的中R":out["的中R"], "後半収支":out["収支"],
+                    "後半回収率%":out["回収率%"], "後半払戻未入力R":out["払戻未入力R"]})
+            show_full_table(pd.DataFrame(compared))
+            st.caption("後半での黒字は将来の利益を保証しません。34R程度では探索候補が偶然高回収率になる危険が大きく、実購入前の追加検証が必要です。")
+        else:
+            st.info("前半データで条件を満たすBOXがありません。")
+        missing_races=sum(1 for _,_,dividend in box_races if dividend == 0)
+        if missing_races:
+            st.warning(f"2車複払戻0円の入力が{missing_races}Rあります。的中時の払戻未入力を含むBOXはランキングから除外しています。")
     st.subheader("2車複｜◎軸・買い目別【累積】")
     show_full_table(style_roi(pd.DataFrame([
         compact_result(name, quinella_named_total[name]) for name in daily_quinella_labels
