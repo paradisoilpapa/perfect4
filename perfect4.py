@@ -498,7 +498,7 @@ with tab_carry:
 
 # 集計区分は表示とCSVに共通。元の100Rデータには一切手を加えない。
 # β軸専用：日次入力から2車複を実車番で集計（引継ぎには触れない）。
-BETA_PARTNERS = tuple(m for m in BOX_LABELS if m != "β" and m != "△")
+BETA_PARTNERS = tuple(m for m in (GROUP_MARKS["通常"] + GROUP_MARKS["妙味"]) if m not in ("β", "△"))
 
 def _beta_score(partners, races):
     n = points = hits = paid = missing = 0
