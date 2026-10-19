@@ -761,28 +761,34 @@ for entry in selected_daily_rows:
     else:
         for q_label in daily_quinella:
             detail[f"2車複 {q_label}"] = "印不足・対象外"
-    # 2車複4車BOX：◎・○・α・ε。4車がすべて異なる場合のみ6点購入。
-    # 過去の単独買い目集計からBOX成績は復元できないため日次入力のみ。
+    # 2車複BOX：◎・○・α・ε。重複車番を除き、成立点数で集計。
     if (len(q_marks) in (4, 5) and len(q_value_marks) in (4, 5)
             and all(mark in q_marks for mark in ("◎", "○"))
             and all(mark in q_value_marks for mark in ("α", "ε"))):
         box_cars = [q_marks["◎"], q_marks["○"], q_value_marks["α"], q_value_marks["ε"]]
-        if len(set(box_cars)) == 4 and all(1 <= int(car) <= field_size for car in box_cars):
-            daily_mixed_box["N"] += 1
-            daily_mixed_box["KSUM"] += 6
-            if set(finish[:2]).issubset(set(box_cars)):
-                daily_mixed_box["H"] += 1
-                if quinella_pay > 0:
-                    daily_mixed_box["SUM"] += quinella_pay
+        if all(1 <= int(car) <= field_size for car in box_cars):
+            unique_cars = set(box_cars)
+            points = len(unique_cars) * (len(unique_cars) - 1) // 2
+            if points > 0:
+                daily_mixed_box["N"] += 1
+                daily_mixed_box["KSUM"] += points
+                detail["2車複 ◎○αεBOX点数"] = points
+                if set(finish[:2]).issubset(unique_cars):
+                    daily_mixed_box["H"] += 1
+                    if quinella_pay > 0:
+                        daily_mixed_box["SUM"] += quinella_pay
+                    else:
+                        daily_mixed_box_missing += 1
+                        warnings.append(f"R{rid}: ◎○αεBOX的中ですが2車複払戻が未入力です。")
+                    detail["2車複 ◎○αεBOX"] = "的中"
                 else:
-                    daily_mixed_box_missing += 1
-                    warnings.append(f"R{rid}: ◎○αεBOX的中ですが2車複払戻が未入力です。")
-                detail["2車複 ◎○αεBOX"] = "的中"
+                    detail["2車複 ◎○αεBOX"] = "外れ"
             else:
-                detail["2車複 ◎○αεBOX"] = "外れ"
+                daily_mixed_box_skips += 1
+                detail["2車複 ◎○αεBOX"] = "成立点数なし・対象外"
         else:
             daily_mixed_box_skips += 1
-            detail["2車複 ◎○αεBOX"] = "重複・対象外"
+            detail["2車複 ◎○αεBOX"] = "車番不正・対象外"
     else:
         detail["2車複 ◎○αεBOX"] = "印不足・対象外"
     # 最終総合評価 εABCD：妙味評価とは独立した任意入力。
@@ -953,10 +959,10 @@ with tab_result:
     st.caption("独立した最終評価の入力があるレースだけ集計。前日引継ぎの妙味ε軸とは混同しません。")
     show_full_table(pd.DataFrame([mark_row(m,daily_final_marks[m]) for m in ("ε","A","B","C","D")]))
     st.subheader("2車複｜◎・○・α・ε 4車BOX【日次入力分】")
-    st.caption("4車が異なるレースのみ、1R6点（各100円）で集計。的中率はBOXが1・2着を両方含んだレースの割合です。引継ぎの買い目別累積値は含めません。")
-    box_result = compact_result("◎・○・α・ε BOX（6点）", daily_mixed_box)
+    st.caption("車番重複を除き、4車なら6点・3車なら3点・2車なら1点（各100円）で集計。引継ぎの買い目別累積値は含めません。")
+    box_result = compact_result("◎・○・α・ε BOX（可変点数）", daily_mixed_box)
     show_full_table(style_roi(pd.DataFrame([box_result])))
-    st.caption(f"車番重複による対象外：{daily_mixed_box_skips}R／的中時の払戻未入力：{daily_mixed_box_missing}R")
+    st.caption(f"車番不正・成立不可による対象外：{daily_mixed_box_skips}R／的中時の払戻未入力：{daily_mixed_box_missing}R")
     st.subheader("2車複｜◎軸・買い目別【累積】")
     show_full_table(style_roi(pd.DataFrame([
         compact_result(name, quinella_named_total[name]) for name in daily_quinella_labels
