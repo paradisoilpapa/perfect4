@@ -1028,6 +1028,21 @@ def _box_score(combo, races):
             "収支":paid-invested, "回収率%":pct(paid,invested),
             "払戻未入力R":missing}
 
+def _box_point_breakdown(combo, races):
+    """日次入力分だけを数え、重複による実購入点数の内訳を返す。"""
+    breakdown = {"6点": 0, "3点": 0, "1点": 0, "対象外": 0}
+    for labels, winners, dividend in races:
+        if not all(mark in labels for mark in combo):
+            breakdown["対象外"] += 1
+            continue
+        unique_count = len({labels[mark] for mark in combo})
+        points = unique_count * (unique_count - 1) // 2
+        if points:
+            breakdown[f"{points}点"] += 1
+        else:
+            breakdown["対象外"] += 1
+    return breakdown
+
 def _box_ranking(races, minimum, combinations_to_check=None):
     if combinations_to_check is None:
         combinations_to_check = BOX_COMBINATIONS
@@ -1059,8 +1074,9 @@ with tab_result:
     show_full_table(style_roi(pd.DataFrame([box_result, alt_box_result])))
     st.caption(f"◎○αε：対象外{daily_mixed_box_skips}R・的中払戻未入力{daily_mixed_box_missing}R ／ ○εαγ：対象外{daily_alt_box_skips}R・的中払戻未入力{daily_alt_box_missing}R")
     st.subheader("2車複｜4車BOX自動探索（全210通り）")
-    st.caption("入力済みのレースから全組み合わせを計算。実車番の重複は1車として扱い、1・3・6点で投資額を算出。引継ぎの買い目別合計は含みません。")
+    st.caption("現在の日次入力に保存済みのレースだけを使用。前日引継ぎ・累積値は一切使用しません。重複車番は1車とし、実購入点数（1・3・6点）で集計します。")
     box_races = _box_race_inputs(selected_daily_rows)
+    st.caption(f"今回の探索対象：日次入力 {len(box_races)}R（除外・着順未入力・印不正のレースを除く）")
     if len(box_races) < 2:
         st.info("探索には2R以上の有効なレース別入力が必要です。")
     else:
@@ -1073,6 +1089,11 @@ with tab_result:
             display_cols = ["BOX","対象R","購入点数","的中R","的中率%","投資額","払戻合計","収支","回収率%"]
             full_frame = pd.DataFrame(all_rank)
             show_full_table(style_roi(full_frame[display_cols].head(30)))
+            with st.expander("4車BOX上位30組：購入点数の内訳（日次のみ）"):
+                breakdown_rows = []
+                for item in all_rank[:30]:
+                    breakdown_rows.append({"BOX": item["BOX"], **_box_point_breakdown(item["_combo"], box_races)})
+                show_full_table(pd.DataFrame(breakdown_rows))
             st.download_button("全210通りの集計CSV", data=full_frame.drop(columns=["_combo"]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_box_all_combinations.csv", mime="text/csv", key="box_search_all_csv")
         else:
             st.info("条件を満たすBOXがありません。最低対象レース数を減らしてください。")
@@ -1097,7 +1118,7 @@ with tab_result:
         if missing_races:
             st.warning(f"2車複払戻0円の入力が{missing_races}Rあります。的中時の払戻未入力を含むBOXはランキングから除外しています。")
     st.subheader("2車複｜3車BOX自動探索（全120通り）")
-    st.caption("4車BOX探索を残したまま追加。3印から重複車番を除き、3車3点・2車1点。1車のみは対象外。レース別入力のみを使用します。")
+    st.caption("現在の日次入力に保存済みのレースだけを使用（引継ぎなし）。3印の実車番を重複除去し、3車3点・2車1点。1車のみは対象外。")
     if len(box_races) < 2:
         st.info("探索には2R以上の有効なレース別入力が必要です。")
     else:
@@ -1107,6 +1128,11 @@ with tab_result:
             cols3 = ["BOX", "対象R", "購入点数", "的中R", "的中率%", "投資額", "払戻合計", "収支", "回収率%"]
             frame3 = pd.DataFrame(rank3)
             show_full_table(style_roi(frame3[cols3].head(30)))
+            with st.expander("3車BOX上位30組：購入点数の内訳（日次のみ）"):
+                breakdown_rows3 = []
+                for item in rank3[:30]:
+                    breakdown_rows3.append({"BOX": item["BOX"], **_box_point_breakdown(item["_combo"], box_races)})
+                show_full_table(pd.DataFrame(breakdown_rows3))
             st.download_button("全120通り・3車BOX集計CSV", data=frame3.drop(columns=["_combo"]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_box_3car_all.csv", mime="text/csv", key="box_search_3car_csv")
         else:
             st.info("条件を満たす3車BOXがありません。")
