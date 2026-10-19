@@ -497,6 +497,44 @@ with tab_carry:
 
 
 # 集計区分は表示とCSVに共通。元の100Rデータには一切手を加えない。
+# β軸専用：日次入力から2車複を実車番で集計（引継ぎには触れない）。
+BETA_PARTNERS = tuple(m for m in BOX_LABELS if m != "β" and m != "△")
+
+def _beta_score(partners, races):
+    n = points = hits = paid = missing = 0
+    hit_details = []
+    for rid, (labels, winners, dividend) in enumerate(races, 1):
+        if "β" not in labels or any(mark not in labels for mark in partners):
+            continue
+        beta = labels["β"]
+        # β自身と同じ車番の相手は購入しない。相手同士も同じ車番なら1点にまとめる。
+        bets = {tuple(sorted((beta, labels[m]))) for m in partners if labels[m] != beta}
+        if not bets:
+            continue
+        n += 1
+        points += len(bets)
+        won = tuple(sorted(winners)) in bets
+        if won:
+            hits += 1
+            if dividend > 0:
+                paid += dividend
+            else:
+                missing += 1
+            hit_details.append(rid)
+    invested = points * 100
+    return {"対象R": n, "購入点数": points, "的中R": hits,
+            "的中率%": pct(hits, n), "投資額": invested, "払戻合計": paid,
+            "収支": paid - invested, "回収率%": pct(paid, invested) if invested else 0,
+            "払戻未入力R": missing}
+
+def _beta_ranking(races, n_partners):
+    rows = []
+    for partners in combinations(BETA_PARTNERS, n_partners):
+        score = _beta_score(partners, races)
+        if score["対象R"] and score["払戻未入力R"] == 0:
+            rows.append({"買い方": "β－" + "・".join(partners), "_partners": partners, **score})
+    return sorted(rows, key=lambda r: (r["回収率%"], r["収支"]), reverse=True)
+
 with tab_result:
     category = st.radio("集計区分", ("男子（通常）", "ガールズ", "全レース"),
                         horizontal=True, key="velovi_result_category")
@@ -1148,6 +1186,34 @@ with tab_result:
         else:
             st.info("前半データで条件を満たす3車BOXがありません。")
         st.caption("3車BOXも全120通りを探索するため、過去の高回収率には偶然の上振れが含まれます。")
+    st.subheader("2車複｜β軸・相手別／2点・3点自動探索【日次入力分】")
+    st.caption("βが連対することを前提とする軸買い。3車BOXとは異なり、相手同士の決着は的中しません。現在の日次入力のみで計算し、引継ぎ・過去累積を含みません。")
+    st.caption("△＝αのため、相手候補の△は重複排除しαに統一。βと相手が同車番の場合はその買い目を除外し、相手同士の同車番も重複購入しません。")
+    beta_columns = ["買い方", "対象R", "購入点数", "的中R", "的中率%", "投資額", "払戻合計", "収支", "回収率%"]
+    if not box_races:
+        st.info("β軸集計には日次入力の有効なレースが必要です。")
+    else:
+        for partner_count, label in ((1, "相手1点・全8通り"), (2, "相手2印・全28通り"), (3, "相手3印・全56通り")):
+            st.markdown(f"**β軸：{label}**")
+            beta_rank = _beta_ranking(box_races, partner_count)
+            if beta_rank:
+                beta_frame = pd.DataFrame(beta_rank)
+                show_full_table(style_roi(beta_frame[beta_columns].head(30)))
+                st.download_button(f"β軸{partner_count}印・全組み合わせCSV", data=beta_frame.drop(columns=["_partners"]).to_csv(index=False).encode("utf-8-sig"), file_name=f"velovi_beta_axis_{partner_count}partners_daily.csv", mime="text/csv", key=f"beta_axis_csv_{partner_count}")
+            else:
+                st.info("有効な組み合わせがありません。")
+        if len(box_races) >= 4:
+            split = max(1, min(len(box_races)-1, int(len(box_races)*0.7)))
+            train_beta, test_beta = box_races[:split], box_races[split:]
+            st.markdown(f"**β軸3印：前半{len(train_beta)}Rで選定→後半{len(test_beta)}Rで検証**")
+            selected = _beta_ranking(train_beta, 3)[:10]
+            checked = []
+            for item in selected:
+                out = _beta_score(item["_partners"], test_beta)
+                checked.append({"買い方":item["買い方"], "前半回収率%":item["回収率%"], "前半的中R":item["的中R"], "後半購入点数":out["購入点数"], "後半的中R":out["的中R"], "後半収支":out["収支"], "後半回収率%":out["回収率%"], "後半払戻未入力R":out["払戻未入力R"]})
+            if checked:
+                show_full_table(pd.DataFrame(checked))
+            st.caption("前半・後半は日次入力順による区分です。過去最適化の上振れに注意してください。")
     st.subheader("2車複｜◎軸・買い目別【累積】")
     show_full_table(style_roi(pd.DataFrame([
         compact_result(name, quinella_named_total[name]) for name in daily_quinella_labels
