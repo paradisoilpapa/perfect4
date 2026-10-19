@@ -578,6 +578,9 @@ daily_final_2f = {m: blank_bet() for m in "ABCD"}
 daily_final_2t = {m: blank_bet() for m in "ABCD"}
 # 通常◎○と妙味αεの4車BOX。レース別データからのみ計算する。
 daily_mixed_box = blank_bet()
+daily_alt_box = blank_bet()
+daily_alt_box_skips = 0
+daily_alt_box_missing = 0
 daily_mixed_box_skips = 0
 daily_mixed_box_missing = 0
 daily_final_marks = {m: blank_mark() for m in ("ε", "A", "B", "C", "D")}
@@ -791,6 +794,35 @@ for entry in selected_daily_rows:
             detail["2車複 ◎○αεBOX"] = "車番不正・対象外"
     else:
         detail["2車複 ◎○αεBOX"] = "印不足・対象外"
+    # 比較BOX：○・ε・α・γ。既存BOXと同一レース・同一払戻で比較。
+    if (len(q_marks) in (4, 5) and len(q_value_marks) in (4, 5)
+            and "○" in q_marks and all(m in q_value_marks for m in ("ε", "α", "γ"))):
+        alt_cars = [q_marks["○"], q_value_marks["ε"], q_value_marks["α"], q_value_marks["γ"]]
+        if all(1 <= int(car) <= field_size for car in alt_cars):
+            alt_unique = set(alt_cars)
+            alt_points = len(alt_unique) * (len(alt_unique) - 1) // 2
+            if alt_points > 0:
+                daily_alt_box["N"] += 1
+                daily_alt_box["KSUM"] += alt_points
+                detail["2車複 ○εαγBOX点数"] = alt_points
+                if set(finish[:2]).issubset(alt_unique):
+                    daily_alt_box["H"] += 1
+                    if quinella_pay > 0:
+                        daily_alt_box["SUM"] += quinella_pay
+                    else:
+                        daily_alt_box_missing += 1
+                        warnings.append(f"R{rid}: ○εαγBOX的中ですが2車複払戻が未入力です。")
+                    detail["2車複 ○εαγBOX"] = "的中"
+                else:
+                    detail["2車複 ○εαγBOX"] = "外れ"
+            else:
+                daily_alt_box_skips += 1
+                detail["2車複 ○εαγBOX"] = "成立点数なし・対象外"
+        else:
+            daily_alt_box_skips += 1
+            detail["2車複 ○εαγBOX"] = "車番不正・対象外"
+    else:
+        detail["2車複 ○εαγBOX"] = "印不足・対象外"
     # 最終総合評価 εABCD：妙味評価とは独立した任意入力。
     final_raw = clean_digits(entry.get("epsilon_final", ""))
     if final_raw:
@@ -958,11 +990,12 @@ with tab_result:
     st.markdown("**最終総合評価 εABCD｜日次入力分**")
     st.caption("独立した最終評価の入力があるレースだけ集計。前日引継ぎの妙味ε軸とは混同しません。")
     show_full_table(pd.DataFrame([mark_row(m,daily_final_marks[m]) for m in ("ε","A","B","C","D")]))
-    st.subheader("2車複｜◎・○・α・ε 4車BOX【日次入力分】")
-    st.caption("車番重複を除き、4車なら6点・3車なら3点・2車なら1点（各100円）で集計。引継ぎの買い目別累積値は含めません。")
+    st.subheader("2車複｜4車BOX比較【日次入力分】")
+    st.caption("◎○αε と ○εαγ を同じ日次入力から比較。重複車番を除き、4車6点・3車3点・2車1点（各100円）。引継ぎの買い目別累積値は含めません。")
     box_result = compact_result("◎・○・α・ε BOX（可変点数）", daily_mixed_box)
-    show_full_table(style_roi(pd.DataFrame([box_result])))
-    st.caption(f"車番不正・成立不可による対象外：{daily_mixed_box_skips}R／的中時の払戻未入力：{daily_mixed_box_missing}R")
+    alt_box_result = compact_result("○・ε・α・γ BOX（可変点数）", daily_alt_box)
+    show_full_table(style_roi(pd.DataFrame([box_result, alt_box_result])))
+    st.caption(f"◎○αε：対象外{daily_mixed_box_skips}R・的中払戻未入力{daily_mixed_box_missing}R ／ ○εαγ：対象外{daily_alt_box_skips}R・的中払戻未入力{daily_alt_box_missing}R")
     st.subheader("2車複｜◎軸・買い目別【累積】")
     show_full_table(style_roi(pd.DataFrame([
         compact_result(name, quinella_named_total[name]) for name in daily_quinella_labels
@@ -1019,6 +1052,6 @@ with tab_result:
         pd.DataFrame([compact_result(f"α－{m}", quinella_all_total["妙味"].get(("α", m), blank_bet())) for m in ("β", "γ", "ε", "Ω")]).assign(分類="2車複α"),
         pd.DataFrame([compact_result(f"α→{m}", total_bet_records["妙味"][("α", m)]) for m in ("β", "γ", "ε", "Ω")]).assign(分類="2車単α"),
         pd.DataFrame(epsilon_quinella).assign(分類="2車複ε"),
-        pd.DataFrame([box_result]).assign(分類="2車複4車BOX（日次のみ）"),
+        pd.DataFrame([box_result, alt_box_result]).assign(分類="2車複4車BOX（日次のみ）"),
         pd.DataFrame([compact_result(f"ε→{m}", total_epsilon_exacta[m]) for m in ("α", "β", "γ", "Ω")]).assign(分類="2車単ε"),
     ], ignore_index=True).to_csv(index=False).encode("utf-8-sig"), file_name=f"velovi_{category}_{session_category}_results.csv", mime="text/csv")
