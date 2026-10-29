@@ -1,1275 +1,358 @@
-# ヴェロビ集計：2車複→2車単、◎・α・ε軸。3連複集計なし。
 # -*- coding: utf-8 -*-
-"""ヴェロビ集計｜通常◎・妙味α 集計版。
+"""惑星理論・独立検証集計 v1
 
-元の618行版を基準とした仕様:
-- 通常 ◎○▲△× / 妙味 αβγεΩ の印着内率
-- 2車単は各軸の1着固定4通りだけ（通常◎、妙味α）
-- 通常◎→○▲△ / 妙味α→γβε の3点セット集計
-- 旧通常評価の入力キー・引継ぎキーを維持
-- 日次100レース、除外、集計CSV、日次・累積レース別確認
+ヴェロビ予想本体には一切依存しない Streamlit 集計アプリ。
+- 太陽 / 惑星 / 衛星(複数) と 通常評価 ◎○▲△× を入力
+- レース単位で2車複・3連複の的中率、実点数に応じた回収率を算出
+- 衛星は優劣を付けず、惑星－衛星など一括フォーメーションとして判定
+- 通常評価の印1着、連対、3着内率および◎－▲の2車複を別枠集計
+- 日次100R (50件ページ)、前日引継ぎ、完全JSONバックアップ、CSV出力
+- 100円均等購入の仮想検証。実購入とは区別する。
 """
-from typing import Dict, List, Tuple
+from __future__ import annotations
+from collections import Counter
+from datetime import date
 from itertools import combinations
+import json
 import re
+from typing import Any
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="ヴェロビ集計｜◎・α比較", layout="wide")
-st.title("ヴェロビ集計｜通常◎・妙味α 比較")
-st.caption("通常評価と妙味軸評価を独立集計。◎→×・無印2車も比較。各買い目100円平買い換算。")
+st.set_page_config(page_title="惑星理論｜独立検証集計", layout="wide")
+st.title("惑星理論｜独立検証集計")
+st.caption("予想本体とは独立。太陽・惑星・衛星だけで車券を生成。通常評価は印着内率と◎－▲の検証専用です。すべて1点100円の仮想平買い。")
 
-GROUP_MARKS = {
-    "通常": ("◎", "○", "▲", "△", "×"),
-    "妙味": ("α", "β", "γ", "ε", "Ω"),
-}
-SET_TARGETS = {"通常": ("○", "▲", "△"), "妙味": ("γ", "β", "ε")}
-GROUP_AXES = {g: marks[0] for g, marks in GROUP_MARKS.items()}
+MARKS = ("◎", "○", "▲", "△", "×")
+BET_NAMES = ("2車複 太陽－惑星", "2車複 太陽－衛星", "2車複 惑星－衛星", "2車複 ◎－▲（別枠）", "3連複 惑星－（太陽・衛星）－（太陽・衛星）")
+SESSIONS = ("モーニング", "デイ", "ナイター", "ミッドナイト")
+SCOPES = ("男子・通常開催", "男子・ミッドナイト", "ガールズ・通常開催", "ガールズ・ミッドナイト")
 
 
-def all_axis_pairs(marks: Tuple[str, ...]) -> List[Tuple[str, str]]:
-    axis = marks[0]
-    return [(axis, other) for other in marks[1:]]
+def initial_row(i: int) -> dict:
+    return {"date": "", "track": "", "race": str(i), "session": "デイ", "girls": False,
+            "sun": "", "planet": "", "satellites": "", "normal": "", "finish": "",
+            "quinella_pay": 0, "trio_pay": 0, "exclude": False}
 
 
-BET_PAIRS = {g: all_axis_pairs(marks) for g, marks in GROUP_MARKS.items()}
+def initial_summary() -> dict:
+    return {"bets": {key: {"n": 0, "h": 0, "points": 0, "paid": 0, "missing": 0} for key in BET_NAMES},
+            "marks": {m: {"n": 0, "c1": 0, "c2": 0, "c3": 0} for m in MARKS},
+            "race_count": 0}
 
 
-def blank_bet():
-    return {"N": 0, "H": 0, "SUM": 0, "KSUM": 0}
+def clean_cars(raw: Any) -> str:
+    return "".join(c for c in str(raw or "") if c in "123456789")
 
 
-def blank_unmarked():
-    return {"N": 0, "H": 0, "SUM": 0, "KSUM": 0}
+def parse_cars(raw: Any, *, max_count: int, exact: int | None = None) -> list[str]:
+    vals = list(clean_cars(raw))
+    if len(vals) > max_count or len(vals) != len(set(vals)) or (exact is not None and len(vals) != exact):
+        raise ValueError("車番が重複しているか、桁数が不正です")
+    return vals
 
 
-def blank_mark():
-    return {"N": 0, "C1": 0, "C2": 0, "C3": 0}
+def ordered_marks(raw: Any) -> dict[str, str]:
+    chars = parse_cars(raw, max_count=5)
+    if len(chars) not in (0, 4, 5):
+        raise ValueError("通常評価は空欄、または◎○▲△×順の4〜5車番で入力してください")
+    return dict(zip(MARKS, chars))
 
 
-def blank_group_bets(g):
-    return {pair: blank_bet() for pair in BET_PAIRS[g]}
+def scope_for(row: dict) -> str:
+    return ("ガールズ" if row.get("girls") else "男子") + "・" + ("ミッドナイト" if row.get("session") == "ミッドナイト" else "通常開催")
 
 
-def blank_group_marks(g):
-    return {mark: blank_mark() for mark in GROUP_MARKS[g]}
+def pair(a: str, b: str) -> tuple[str, str]:
+    return tuple(sorted((a, b)))
 
 
-def add_records(left, right, fields):
-    return {f: int(left.get(f, 0)) + int(right.get(f, 0)) for f in fields}
+def trip(a: str, b: str, c: str) -> tuple[str, str, str]:
+    return tuple(sorted((a, b, c)))
 
 
-def pct(num, den):
-    return round(100 * num / den, 1) if den else None
+def build_bets(sun: str, planet: str, satellites: list[str], marks: dict[str, str]) -> dict[str, set[tuple]]:
+    sat = set(satellites)
+    pool = sorted({sun, *sat})
+    bets = {
+        BET_NAMES[0]: {pair(sun, planet)},
+        BET_NAMES[1]: {pair(sun, s) for s in sat},
+        BET_NAMES[2]: {pair(planet, s) for s in sat},
+        BET_NAMES[3]: set(),
+        BET_NAMES[4]: {trip(planet, a, b) for a, b in combinations(pool, 2)},
+    }
+    if "◎" in marks and "▲" in marks and marks["◎"] != marks["▲"]:
+        bets[BET_NAMES[3]] = {pair(marks["◎"], marks["▲"])}
+    # 予想本体とは無関係。誤入力などの重複車番を含む組合せは除去。
+    return {k: {v for v in group if len(set(v)) == len(v)} for k, group in bets.items()}
 
 
-def clean_digits(value: str) -> str:
-    """元コードと同じく区切りを無視して車番数字を取得する。"""
-    return "".join(c for c in str(value or "") if c.isdigit())
+def process(row: dict) -> tuple[dict | None, list[str]]:
+    warnings: list[str] = []
+    fields = ("sun", "planet", "satellites", "normal", "finish", "quinella_pay", "trio_pay")
+    if row.get("exclude"):
+        return None, warnings
+    if not any(str(row.get(x, "")).strip() not in ("", "0") for x in fields):
+        return None, warnings
+    rid = f"{row.get('date', '')} {row.get('track', '')} {row.get('race', '')}".strip()
+    try:
+        finish = parse_cars(row.get("finish", ""), max_count=3, exact=3)
+        sun = parse_cars(row.get("sun", ""), max_count=1, exact=1)[0]
+        planet = parse_cars(row.get("planet", ""), max_count=1, exact=1)[0]
+        sat = parse_cars(row.get("satellites", ""), max_count=7)
+        marks = ordered_marks(row.get("normal", ""))
+        if sun == planet or any(s in (sun, planet) for s in sat):
+            raise ValueError("太陽・惑星・衛星の車番に重複があります")
+        universe = {sun, planet, *sat, *finish, *marks.values()}
+        if any(v not in "1234567" for v in universe):
+            raise ValueError("車番は1〜7の範囲で入力してください")
+        if not sat:
+            raise ValueError("衛星を1車以上入力してください")
+        qpay = int(row.get("quinella_pay") or 0)
+        tpay = int(row.get("trio_pay") or 0)
+        if qpay < 0 or tpay < 0:
+            raise ValueError("払戻額は0以上で入力してください")
+    except (ValueError, TypeError, IndexError) as e:
+        return None, [f"{rid}：{e}"]
+
+    qresult = pair(finish[0], finish[1])
+    tresult = tuple(sorted(finish))
+    bets = build_bets(sun, planet, sat, marks)
+    detail = {"日付": row.get("date", ""), "会場": row.get("track", ""),
+              "R": row.get("race", ""), "開催": row.get("session", "デイ"), "区分": scope_for(row),
+              "太陽": sun, "惑星": planet, "衛星": "".join(sat), "通常評価": row.get("normal", ""),
+              "着順": "-".join(finish), "2車複配当": qpay, "3連複配当": tpay,
+              "bets": {}, "marks": marks}
+    for key, candidates in bets.items():
+        triple = key.startswith("3連複")
+        won = (tresult if triple else qresult) in candidates if candidates else False
+        paid = tpay if triple else qpay
+        if won and paid <= 0:
+            warnings.append(f"{rid}：{key}が的中しましたが払戻額が0です。回収率は未確定扱いにします")
+        detail["bets"][key] = {"n": int(bool(candidates)), "h": int(won), "points": len(candidates),
+                                "paid": paid if won else 0, "missing": int(won and paid <= 0),
+                                "formation": " / ".join("-".join(x) for x in sorted(candidates))}
+    return detail, warnings
 
 
-def parse_markline(value: str, group: str) -> Dict[str, str]:
-    """4車または5車。通常は◎○▲△×、妙味はαβγεΩ。"""
-    s = clean_digits(value)
-    if len(s) not in (4, 5) or len(set(s)) != len(s) or "0" in s:
-        return {}
-    return dict(zip(GROUP_MARKS[group][:len(s)], list(s)))
+def add_summary(target: dict, source: dict) -> None:
+    for bet in BET_NAMES:
+        for k in ("n", "h", "points", "paid", "missing"):
+            target["bets"][bet][k] += int(source.get("bets", {}).get(bet, {}).get(k, 0))
+    for mark in MARKS:
+        for k in ("n", "c1", "c2", "c3"):
+            target["marks"][mark][k] += int(source.get("marks", {}).get(mark, {}).get(k, 0))
+    target["race_count"] += int(source.get("race_count", 0))
 
 
-def parse_finish(value: str) -> List[str]:
-    """上位3着を取得。旧版同様、後続の余分な数字は無視する。"""
-    s = clean_digits(value)
-    result = []
-    for c in s:
-        if c == "0":
-            continue
-        if c not in result:
-            result.append(c)
-        if len(result) == 3:
-            break
+def from_details(details: list[dict]) -> dict:
+    result = initial_summary()
+    for d in details:
+        result["race_count"] += 1
+        for bet, rec in d["bets"].items():
+            for field in ("n", "h", "points", "paid", "missing"):
+                result["bets"][bet][field] += rec[field]
+        for mark, car in d["marks"].items():
+            result["marks"][mark]["n"] += 1
+            f = d["着順"].split("-")
+            if car in f:
+                result["marks"][mark][f"c{f.index(car)+1}"] += 1
     return result
 
 
-def mark_row(mark: str, rec: Dict[str, int]) -> Dict:
-    n = int(rec["N"])
-    c1, c2, c3 = (int(rec[f"C{i}"]) for i in (1, 2, 3))
-    return {
-        "印": mark,
-        "対象N": n,
-        "1着回数": c1,
-        "2着回数": c2,
-        "3着回数": c3,
-        "1着率%": pct(c1, n),
-        "連対率%": pct(c1 + c2, n),
-        "印着内率%": pct(c1 + c2 + c3, n),
-    }
+def percent(a: int, b: int) -> float | None:
+    return round(a * 100 / b, 2) if b else None
 
 
-def bet_row(name: str, rec: Dict[str, int]) -> Dict:
-    n, h, summ = int(rec["N"]), int(rec["H"]), int(rec["SUM"])
-    ksum = int(rec.get("KSUM", n))
-    invest = ksum * 100
-    return {
-        "買い目": name,
-        "対象R": n,
-        "購入点数": ksum,
-        "投資額": invest,
-        "的中数": h,
-        "的中率%": pct(h, n),
-        "払戻合計": summ,
-        "平均的中配当": round(summ / h, 1) if h else None,
-        "回収率%": pct(summ, invest),
-    }
+def bet_table(s: dict) -> pd.DataFrame:
+    rows = []
+    for name, r in s["bets"].items():
+        investment = r["points"] * 100
+        rows.append({"方式": name, "対象R": r["n"], "的中R": r["h"],
+                     "的中率%": percent(r["h"], r["n"]), "購入点数": r["points"],
+                     "投資額": investment, "払戻額": r["paid"],
+                     "収支": r["paid"] - investment if not r["missing"] else None,
+                     "回収率%": percent(r["paid"], investment) if not r["missing"] else None,
+                     "配当未入力R": r["missing"]})
+    return pd.DataFrame(rows)
 
 
-def style_roi(df):
-    def color_roi(value):
-        try:
-            v = float(value)
-        except (TypeError, ValueError):
-            return ""
-        if v >= 100:
-            return "background-color: #d9ead3; font-weight: 700;"
-        if v >= 90:
-            return "background-color: #fff2cc; font-weight: 600;"
-        return ""
-    if "回収率%" not in df.columns:
-        return df
-    formats = {col: "{:.1f}" for col in df.columns if "率%" in str(col) or col == "平均的中配当"}
-    return df.style.format(formats, na_rep="—").map(color_roi, subset=["回収率%"])
+def mark_table(s: dict) -> pd.DataFrame:
+    rows=[]
+    for mark, r in s["marks"].items():
+        n=r["n"]
+        rows.append({"印": mark, "対象R": n, "1着": r["c1"], "2着": r["c2"], "3着": r["c3"],
+                     "1着率%": percent(r["c1"], n), "連対率%": percent(r["c1"]+r["c2"], n),
+                     "3着内率%": percent(r["c1"]+r["c2"]+r["c3"], n)})
+    return pd.DataFrame(rows)
 
 
-def show_full_table(data, *, hide_index=True):
-    rows = len(data.data) if isinstance(data, pd.io.formats.style.Styler) else len(data)
-    st.dataframe(data, use_container_width=True, hide_index=hide_index,
-                 height=max(110, 39 + rows * 36))
+if "planet_daily_rows_v1" not in st.session_state:
+    st.session_state["planet_daily_rows_v1"] = [initial_row(i) for i in range(1,101)]
+if "planet_carry_v1" not in st.session_state:
+    st.session_state["planet_carry_v1"] = {s: initial_summary() for s in SCOPES}
 
 
-def pair_label(a, b):
-    return f"2車単 {a}-{b}"
+def clear_widget_cache():
+    for key in list(st.session_state):
+        if key.startswith("pv1_row_"):
+            del st.session_state[key]
 
 
-def carry_keys(group, a, b):
-    """旧版の入力キーを可能な限り維持する。
-
-    旧 CURRENT_2T_BETS に存在したものは carry_*、
-    旧追加全20通りは pair_carry_* に保存されていた。
-    """
-    label = pair_label(a, b)
-    legacy_direct = {
-        "2車単 ◎-○", "2車単 ◎-▲", "2車単 ◎-△", "2車単 ◎-×",
-        "2車単 ○-◎", "2車単 ○-▲", "2車単 △-◎", "2車単 △-○",
-        "2車単 △-▲", "2車単 ▲-◎",
-    }
-    if group == "通常":
-        prefix = "carry" if label in legacy_direct else "pair_carry"
-        return tuple(f"{prefix}_{f}_{label}" for f in ("n", "h", "sum"))
-    return tuple(f"alpha_carry_{f}_{a}_{b}" for f in ("n", "h", "sum"))
+def make_backup() -> bytes:
+    return json.dumps({"format": "planet_theory_aggregate_v1", "daily_rows": st.session_state["planet_daily_rows_v1"],
+                       "carry": st.session_state["planet_carry_v1"]}, ensure_ascii=False, indent=2).encode("utf-8")
 
 
-# ============================================================
-# A. 日次入力（旧版と同じ100R、旧通常入力キーを保持）
-# ============================================================
-tab_daily, tab_carry, tab_result = st.tabs(
-    ["日次入力", "前日までの集計（引継ぎ）", "集計結果"]
-)
-
-# 100Rの入力欄を50Rずつ描画する。ページ間の値はウィジェットとは別に保持。
-import json
-
-def _empty_race(i):
-    return {"race": str(i), "normal": "", "alpha": "", "epsilon_final": "", "finish": "",
-            "pay": 0, "quinella_pay": 0,
-            "wide_entries": [["", 0] for _ in range(3)],
-            "field_size": 7, "exclude": False, "girls": False, "session": "デイ"}
-
-if "velovi_saved_daily_50" not in st.session_state:
-    _prior = [_empty_race(i) for i in range(1, 101)]
-    # 旧100R画面から同じStreamlitセッションで切替えた場合、旧キーを引き継ぐ。
-    for _i in range(1, 101):
-        _r = _prior[_i - 1]
-        for _field, _prefix in (("race", "rid"), ("normal", "mark"), ("alpha", "alpha_mark"), ("finish", "fin"), ("pay", "pay2t"), ("quinella_pay", "pay2f"), ("field_size", "field_size"), ("exclude", "exclude")):
-            _r[_field] = st.session_state.get(f"{_prefix}_{_i}", _r[_field])
-        for _j in range(1, 4):
-            _r["wide_entries"][_j-1] = [st.session_state.get(f"wide_pair{_j}_{_i}", ""), st.session_state.get(f"wide_pay{_j}_{_i}", 0)]
-    st.session_state["velovi_saved_daily_50"] = _prior
-
-with tab_daily:
-    st.caption("100Rの枠はそのまま、50Rずつ表示します。切り替える前に『この50Rを反映』を押してください。")
-    page = st.radio("入力範囲", [0, 1], format_func=lambda p: "1～50R" if p == 0 else "51～100R", horizontal=True, key="velovi_50_page")
-    start, end = page * 50, (page + 1) * 50
-    page_rows = []
-    with st.form(f"daily_input_form_50_{page}"):
-        for i in range(start + 1, end + 1):
-            old = st.session_state["velovi_saved_daily_50"][i-1]
-            st.markdown(f"**{i}R**")
-            c1, c2, c3 = st.columns([1.0, 2.0, 2.0])
-            rid = c1.text_input("R番号", value=str(old["race"]), key=f"p{page}_rid_{i}")
-            normal = c2.text_input("通常印順 ◎○▲△×", value=str(old["normal"]), key=f"p{page}_mark_{i}")
-            alpha = c3.text_input("妙味印順 αβγεΩ", value=str(old["alpha"]), key=f"p{page}_alpha_{i}")
-            epsilon_final = st.text_input("最終総合評価 εABCD（任意・5車番）", value=str(old.get("epsilon_final", "")), key=f"p{page}_epsilon_final_{i}")
-            c4, c5, c6, c7 = st.columns([1.6, 1.5, 1.0, 0.9])
-            finish = c4.text_input("着順（3着まで）", value=str(old["finish"]), key=f"p{page}_fin_{i}")
-            quinella_pay = c5.number_input("2車複払戻（100円）", min_value=0, value=int(old["quinella_pay"]), step=10, key=f"p{page}_pay2f_{i}")
-            pay = c5.number_input("2車単払戻", min_value=0, value=int(old["pay"]), step=10, key=f"p{page}_pay2t_{i}")
-            field_size = c6.selectbox("車数", [7, 6], index=0 if int(old["field_size"]) == 7 else 1, key=f"p{page}_field_size_{i}")
-            # ミッドナイトだけチェック式にする。旧JSONの開催時間帯も読み取る。
-            session_value = old.get("session", "デイ")
-            midnight = c7.checkbox("ミッドナイト", value=(session_value == "ミッドナイト"), key=f"p{page}_midnight_{i}")
-            session = "ミッドナイト" if midnight else (session_value if session_value in ("モーニング", "デイ", "ナイター") else "デイ")
-            girls = c7.checkbox("ガールズ", value=bool(old.get("girls", False)), key=f"p{page}_girls_{i}")
-            exclude = c7.checkbox("集計除外", value=bool(old["exclude"]), key=f"p{page}_exclude_{i}")
-            page_rows.append({"race": rid, "normal": normal, "alpha": alpha, "epsilon_final": epsilon_final,
-                "finish": finish, "pay": int(pay),
-                "quinella_pay": int(quinella_pay), "wide_entries": old.get("wide_entries", [["", 0] for _ in range(3)]),
-                "field_size": int(field_size), "exclude": bool(exclude), "girls": bool(girls), "session": session})
-            st.divider()
-        submitted_50 = st.form_submit_button("この50Rを反映")
-    if submitted_50:
-        st.session_state["velovi_saved_daily_50"][start:end] = page_rows
-        st.success(f"{start+1}～{end}Rを反映しました。")
-    daily_rows = st.session_state["velovi_saved_daily_50"]
-    st.download_button("入力内容をバックアップ（JSON）", data=json.dumps({"daily_rows": daily_rows}, ensure_ascii=False).encode("utf-8"), file_name="velovi_input_backup.json", mime="application/json")
-    upload = st.file_uploader("入力バックアップを復元（JSON）", type=["json"], key="velovi_restore_50")
-    if st.button("バックアップを復元", disabled=upload is None):
-        try:
-            payload = json.loads(upload.getvalue().decode("utf-8"))
-            rows = payload["daily_rows"]
-            if not isinstance(rows, list) or len(rows) != 100:
-                raise ValueError("100R分のデータではありません")
-            st.session_state["velovi_saved_daily_50"] = [{**_empty_race(i), **r} for i, r in enumerate(rows, 1)]
-            # 既存ウィジェットキーを破棄し、復元データから入力欄を再生成する。
-            for key in list(st.session_state.keys()):
-                if key.startswith(("p0_", "p1_")):
-                    del st.session_state[key]
-            st.rerun()
-        except (ValueError, KeyError, TypeError, UnicodeError) as exc:
-            st.error(f"復元できません: {exc}")
-
-
-# ============================================================
-# B. 引継ぎ（旧通常評価の入力キーを維持）
-# ============================================================
-carry_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
-carry_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
-carry_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印")}
-
-daily_quinella_labels = ('◎－○', '◎－▲', '◎－△', '◎－×', '◎－無印合計', '◎－β', '◎－ε')
-carry_quinella_all = {g:{} for g in GROUP_MARKS}
-carry_quinella_named = {}
-carry_epsilon_exacta = {m: blank_bet() for m in ("α", "β", "γ", "Ω")}
-carry_epsilon_quinella = {m: blank_bet() for m in ("β", "γ", "Ω")}
-
-# 保存・復元はセッション外でも使える明示的なJSONバックアップで行う。
-# Streamlit Cloudではローカルファイルの永続性を保証できないため、
-# サーバー内ファイルへの自動保存だけに依存しない。
-CARRY_KEY_PREFIXES = (
-    "carry_mark_", "alpha_carry_mark_", "carry_", "pair_carry_",
-    "alpha_carry_", "unmarked_", "wide_carry_", "carry_qall_",
-    "carry_qnamed_", "carry_wextra_", "unified_", "trio2_carry_", "epsilon_carry_", "scopedcarry_",
-)
-
-
-def export_complete_backup():
-    carry = {}
-    for key, value in st.session_state.items():
-        if isinstance(key, str) and key.startswith(CARRY_KEY_PREFIXES) and isinstance(value, (int, float, str, bool)):
-            carry[key] = int(value) if isinstance(value, (int, float)) else value
-    return {
-        "format": "velovi_complete_backup_v1",
-        "daily_rows": st.session_state["velovi_saved_daily_50"],
-        "carry_values": carry,
-    }
-
-
-def restore_complete_backup(payload):
-    if not isinstance(payload, dict):
-        raise ValueError("バックアップ形式が不正です")
+def restore_backup(blob: bytes):
+    payload = json.loads(blob.decode("utf-8"))
+    if payload.get("format") != "planet_theory_aggregate_v1":
+        raise ValueError("惑星理論集計v1のバックアップではありません。元の集計コードのJSONと混同しないでください")
     rows = payload.get("daily_rows")
-    carry = payload.get("carry_values")
-    if not isinstance(rows, list) or len(rows) != 100:
-        raise ValueError("日次データが100R分ありません")
-    if not isinstance(carry, dict):
-        raise ValueError("引継ぎ値が含まれていません。日次のみの旧バックアップです")
-    clean_carry = {}
-    for key, value in carry.items():
-        if not isinstance(key, str) or not key.startswith(CARRY_KEY_PREFIXES):
-            continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 or int(value) != value:
-            raise ValueError(f"引継ぎ値が不正です: {key}")
-        clean_carry[key] = int(value)
-    new_rows = []
+    carry = payload.get("carry")
+    if not isinstance(rows, list) or len(rows) != 100 or not isinstance(carry, dict):
+        raise ValueError("日次100Rまたは引継ぎデータが不正です")
+    new_rows=[]
     for i, row in enumerate(rows, 1):
         if not isinstance(row, dict):
-            raise ValueError(f"日次{i}Rの形式が不正です")
-        new_rows.append({**_empty_race(i), **row})
-    st.session_state["velovi_saved_daily_50"] = new_rows
-    # 復元ファイルにない過去値が混ざらないように初期化する。
-    for key in list(st.session_state):
-        if isinstance(key, str) and (key.startswith(CARRY_KEY_PREFIXES) or key.startswith(("p0_", "p1_"))):
-            del st.session_state[key]
-    st.session_state.update(clean_carry)
+            raise ValueError(f"{i}件目の入力が不正です")
+        new_rows.append({**initial_row(i), **row})
+    new_carry = {scope: initial_summary() for scope in SCOPES}
+    for scope, s in carry.items():
+        if scope not in new_carry or not isinstance(s, dict):
+            raise ValueError("引継ぎ区分が不正です")
+        for bet in BET_NAMES:
+            data = s.get("bets", {}).get(bet, {})
+            for k in ("n", "h", "points", "paid", "missing"):
+                v = data.get(k, 0)
+                if not isinstance(v, int) or v < 0:
+                    raise ValueError("引継ぎ数値が不正です")
+                new_carry[scope]["bets"][bet][k] = v
+        for mark in MARKS:
+            for k in ("n", "c1", "c2", "c3"):
+                v = s.get("marks", {}).get(mark, {}).get(k, 0)
+                if not isinstance(v, int) or v < 0:
+                    raise ValueError("引継ぎ印数値が不正です")
+                new_carry[scope]["marks"][mark][k] = v
+        new_carry[scope]["race_count"] = int(s.get("race_count", 0))
+    st.session_state["planet_daily_rows_v1"] = new_rows
+    st.session_state["planet_carry_v1"] = new_carry
+    clear_widget_cache()
 
+
+tab_daily, tab_carry, tab_results = st.tabs(["日次入力", "引継ぎ・バックアップ", "集計結果"])
+with tab_daily:
+    st.info("50件ずつ入力し、必ず『この50件を反映』を押してください。日次バックアップには反映済みデータだけが入ります。")
+    page = st.radio("入力範囲", (0,1), format_func=lambda i: "1〜50件" if i == 0 else "51〜100件", horizontal=True)
+    start=page*50
+    incoming=[]
+    with st.form(f"pv1_form_{page}"):
+        for idx in range(start, start+50):
+            r=st.session_state["planet_daily_rows_v1"][idx]
+            st.markdown(f"**入力枠 {idx+1}**")
+            c=st.columns([1.25, 1.5, .65, 1.25, .85, .9])
+            day=c[0].text_input("日付 YYYY-MM-DD",value=str(r.get("date","")),key=f"pv1_row_{idx}_date")
+            track=c[1].text_input("会場",value=str(r.get("track","")),key=f"pv1_row_{idx}_track")
+            race=c[2].text_input("R",value=str(r.get("race", "")),key=f"pv1_row_{idx}_race")
+            session=c[3].selectbox("時間帯",SESSIONS,index=SESSIONS.index(r.get("session","デイ")) if r.get("session") in SESSIONS else 1,key=f"pv1_row_{idx}_session")
+            girls=c[4].checkbox("ガールズ",value=bool(r.get("girls",False)),key=f"pv1_row_{idx}_girls")
+            exclude=c[5].checkbox("集計除外",value=bool(r.get("exclude",False)),key=f"pv1_row_{idx}_exclude")
+            c=st.columns([.8,.8,1.4,1.5,1.0])
+            sun=c[0].text_input("太陽",value=str(r.get("sun","")),key=f"pv1_row_{idx}_sun")
+            planet=c[1].text_input("惑星",value=str(r.get("planet","")),key=f"pv1_row_{idx}_planet")
+            satellites=c[2].text_input("衛星（複数可）",value=str(r.get("satellites","")),key=f"pv1_row_{idx}_satellites")
+            normal=c[3].text_input("通常印 ◎○▲△×",value=str(r.get("normal","")),key=f"pv1_row_{idx}_normal")
+            finish=c[4].text_input("着順1〜3着",value=str(r.get("finish","")),key=f"pv1_row_{idx}_finish")
+            c=st.columns(2)
+            qpay=c[0].number_input("2車複払戻（100円につき）",value=max(0,int(r.get("quinella_pay") or 0)),step=10,min_value=0,key=f"pv1_row_{idx}_qpay")
+            tpay=c[1].number_input("3連複払戻（100円につき）",value=max(0,int(r.get("trio_pay") or 0)),step=10,min_value=0,key=f"pv1_row_{idx}_tpay")
+            incoming.append({"date":day,"track":track,"race":race,"session":session,"girls":girls,"exclude":exclude,
+                             "sun":sun,"planet":planet,"satellites":satellites,"normal":normal,
+                             "finish":finish,"quinella_pay":int(qpay),"trio_pay":int(tpay)})
+            st.divider()
+        submitted=st.form_submit_button("この50件を反映",type="primary")
+    if submitted:
+        st.session_state["planet_daily_rows_v1"][start:start+50]=incoming
+        st.success("50件を反映しました。バックアップの保存もお忘れなく。")
 
 with tab_carry:
-    st.subheader("前日までの集計（累積・引継ぎ）")
-    st.warning("引継ぎ値はセッション内だけでは永続保存されません。入力後に下部の『日次＋引継ぎをまとめてバックアップ』を保存し、次回はここから復元してください。")
-    restored_file = st.file_uploader("日次＋前日までの集計を復元（完全バックアップJSON）", type=["json"], key="velovi_complete_restore_file")
-    if st.button("完全バックアップを復元", disabled=restored_file is None, key="velovi_complete_restore_button"):
+    st.warning("Streamlitのセッション情報は永続保存ではありません。完全バックアップJSONを保存して次回復元してください。旧集計コードのバックアップ形式とは別です。")
+    st.download_button("日次＋引継ぎを完全バックアップ（JSON）",make_backup(),file_name="planet_aggregate_complete_v1.json",mime="application/json")
+    uploaded=st.file_uploader("惑星理論集計v1バックアップを復元",type=["json"])
+    if st.button("完全バックアップを復元",disabled=uploaded is None):
         try:
-            restore_complete_backup(json.loads(restored_file.getvalue().decode("utf-8")))
+            restore_backup(uploaded.getvalue())
+            st.success("復元しました")
             st.rerun()
-        except (ValueError, KeyError, TypeError, UnicodeError) as exc:
-            st.error(f"完全バックアップを復元できません: {exc}")
-    st.markdown("### 区分別の前日引継ぎ（新方式）")
-    st.caption("男子通常・男子ミッドナイト・ガールズ通常・ガールズミッドナイトを別保存。日次入力と同じく2車複→2車単の順です。旧引継ぎとは重複入力しないでください。")
-    scope_options = {"男子・通常開催":"boy_day", "男子・ミッドナイト":"boy_mid", "ガールズ・通常開催":"girl_day", "ガールズ・ミッドナイト":"girl_mid"}
-    _scope_tabs = st.tabs(list(scope_options))
-    for _scope_tab, (scope_name, scope_id) in zip(_scope_tabs, scope_options.items()):
-        with _scope_tab:
-            with st.form("scoped_carry_form_" + scope_id):
-                for group, marks in GROUP_MARKS.items():
-                    st.markdown(f"**{group}評価・印着内率**")
-                    cols = st.columns([1.1, 1, 1, 1, 1])
-                    for col, name in zip(cols, ("印", "対象R", "1着", "2着", "3着")):
-                        col.markdown(f"**{name}**")
-                    for mark in marks:
-                        cols = st.columns([1.1, 1, 1, 1, 1])
-                        cols[0].write(mark)
-                        for col, field in zip(cols[1:], ("n", "c1", "c2", "c3")):
-                            col.number_input(field, min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_mark_{group}_{mark}_{field}")
-                for ticket_type in ("2車複", "2車単"):
-                    for axis, targets in (("◎", ("○", "▲", "△", "×", "無印", "β", "ε")),
-                                          ("α", ("β", "γ", "ε", "Ω")),
-                                          ("ε", ("β", "γ", "Ω")) if ticket_type == "2車複" else ("ε", ("α", "β", "γ", "Ω"))):
-                        st.markdown(f"**{ticket_type}｜{axis}軸**")
-                        c = st.columns([2, 1, 1, 1, 1])
-                        for col, title in zip(c, ("買い目", "対象R", "購入点数", "的中数", "払戻合計")):
-                            col.markdown(f"**{title}**")
-                        for target in targets:
-                            label = f"{axis}{'－' if ticket_type == '2車複' else '→'}{target}"
-                            code = f"{ticket_type}_{axis}_{target}"
-                            c = st.columns([2, 1, 1, 1, 1])
-                            c[0].write(label)
-                            c[1].number_input("対象R", min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_n")
-                            if target == "無印":
-                                c[2].number_input("購入点数", min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_points")
-                            else:
-                                c[2].caption("対象Rと同数")
-                            c[3].number_input("的中数", min_value=0, step=1, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_h")
-                            c[4].number_input("払戻合計", min_value=0, step=10, label_visibility="collapsed", key=f"scopedcarry_{scope_id}_{code}_sum")
-                st.form_submit_button("この区分の引継ぎを反映")
-    st.divider()
-    with st.expander("従来の区分なし引継ぎ（既存データ互換）"):
-        st.caption(
-            "通常評価は印別1～3着回数と、◎1着固定の2車単4通りを転記。"
-            "妙味評価はα軸の成績を新規入力。旧版の他の2車単は転記不要です。"
-            "引継ぎ対象Nは各印・買い目ごとに入力できます。"
-        )
-        st.caption("前日までの対象R・的中数・払戻合計を入力します。1R1点の買い目は購入点数を自動計算します。")
-        with st.form("carryover_form"):
-            for group, marks in GROUP_MARKS.items():
-                st.markdown(f"### {group}評価｜印別 入賞回数（引継ぎ）")
-                h = st.columns([1.2, 1.0, 1.0, 1.0, 1.0])
-                for col, title in zip(h, ["印", "対象N", "1着", "2着", "3着"]):
-                    col.markdown(f"**{title}**")
-                for mark in marks:
-                    c0, c1, c2, c3, c4 = st.columns([1.2, 1.0, 1.0, 1.0, 1.0])
-                    c0.markdown(f"**{mark}**")
-                    prefix = "carry_mark" if group == "通常" else "alpha_carry_mark"
-                    n = c1.number_input("対象N", min_value=0, value=0, step=1,
-                                        key=f"{prefix}_n_{mark}", label_visibility="collapsed")
-                    x1 = c2.number_input("1着", min_value=0, value=0, step=1,
-                                         key=f"{prefix}_c1_{mark}", label_visibility="collapsed")
-                    x2 = c3.number_input("2着", min_value=0, value=0, step=1,
-                                         key=f"{prefix}_c2_{mark}", label_visibility="collapsed")
-                    x3 = c4.number_input("3着", min_value=0, value=0, step=1,
-                                         key=f"{prefix}_c3_{mark}", label_visibility="collapsed")
-                    carry_mark_records[group][mark] = {"N": int(n), "C1": int(x1),
-                                                        "C2": int(x2), "C3": int(x3)}
-                    if x1 + x2 + x3 > n:
-                        st.warning(f"{group}{mark}: 1～3着回数合計が対象Nを超えています。")
-
-            # 旧入力キーからの復元は下の統一欄に一度だけ取り込む。
-            def old_value(key):
-                return int(st.session_state.get(key, 0) or 0)
-
-            def old_record(prefix):
-                return {"N": old_value(prefix + "_n"), "H": old_value(prefix + "_h"),
-                        "SUM": old_value(prefix + "_sum"), "KSUM": old_value(prefix + "_points")}
-
-            def merged_legacy_unmarked(prefixes):
-                rows = [old_record(prefix) for prefix in prefixes]
-                return {"N": max((r["N"] for r in rows), default=0),
-                        "H": sum(r["H"] for r in rows), "SUM": sum(r["SUM"] for r in rows),
-                        "KSUM": sum(r["KSUM"] or r["N"] for r in rows)}
-
-            def carry_entry(label, key, legacy=None, points=None, multi=False):
-                legacy = legacy or blank_bet()
-                n_default = legacy["N"]
-                k_default = legacy["KSUM"] or (n_default * points if points else n_default)
-                if multi:
-                    c = st.columns([2.3, 1, 1, 1, 1.3])
-                    c[0].markdown(f"**{label}**")
-                    n = c[1].number_input("対象R", min_value=0, value=n_default, key=key+"_n", label_visibility="collapsed")
-                    k = c[2].number_input("購入点数", min_value=0, value=k_default, key=key+"_points", label_visibility="collapsed")
-                    h = c[3].number_input("的中数", min_value=0, value=legacy["H"], key=key+"_h", label_visibility="collapsed")
-                    v = c[4].number_input("払戻合計", min_value=0, value=legacy["SUM"], step=10, key=key+"_sum", label_visibility="collapsed")
-                else:
-                    c = st.columns([2.3, 1, 1, 1.3])
-                    c[0].markdown(f"**{label}**")
-                    n = c[1].number_input("対象R", min_value=0, value=n_default, key=key+"_n", label_visibility="collapsed")
-                    k = int(n)
-                    h = c[2].number_input("的中数", min_value=0, value=legacy["H"], key=key+"_h", label_visibility="collapsed")
-                    v = c[3].number_input("払戻合計", min_value=0, value=legacy["SUM"], step=10, key=key+"_sum", label_visibility="collapsed")
-                return {"N":int(n), "KSUM":int(k), "H":int(h), "SUM":int(v)}
-
-            def header(multi=False):
-                labels = ("買い目", "対象R", "購入点数", "的中数", "払戻合計") if multi else ("買い目", "対象R", "的中数", "払戻合計")
-                c = st.columns([2.3, 1, 1, 1, 1.3] if multi else [2.3, 1, 1, 1.3])
-                for col, name in zip(c, labels):
-                    col.markdown(f"**{name}**")
-
-            st.markdown("### 2車複｜通常評価（◎軸）")
-            header()
-            for other in ("○", "▲", "△", "×", "無印", "β", "ε"):
-                label = "◎－" + other
-                named = old_record("carry_qnamed_" + ("◎－無印合計" if other == "無印" else label))
-                if not any(named.values()):
-                    if other == "無印":
-                        prefixes = [f"carry_qall_n_◎_無印{i}" for i in (1,2)]
-                        named = merged_legacy_unmarked(prefixes)
-                    elif other in ("○", "▲", "△", "×"):
-                        named = old_record(f"carry_qall_n_◎_{other}")
-                carry_quinella_named["◎－無印合計" if other == "無印" else label] = carry_entry(
-                    label, "unified_2f_normal_"+other, named, multi=(other == "無印"))
-
-            st.markdown("### 2車複｜妙味評価（α軸）")
-            header()
-            for other in ("β", "γ", "ε", "Ω", "無印"):
-                if other == "無印":
-                    legacy = merged_legacy_unmarked([f"carry_qall_v_α_無印{i}" for i in (1,2)])
-                else:
-                    legacy = old_record(f"carry_qall_v_α_{other}")
-                carry_quinella_all["妙味"][("α",other)] = carry_entry(
-                    f"α－{other}", "unified_2f_value_"+other, legacy, multi=(other == "無印"))
-            st.markdown("### 2車複｜妙味評価（ε軸・過去分引継ぎ）")
-            st.caption("ε－αは上のα－εと同一車券のため、そちらの引継ぎ値を共有します。")
-            header()
-            for other in ("β", "γ", "Ω"):
-                carry_epsilon_quinella[other] = carry_entry(
-                    f"ε－{other}", f"epsilon_carry_2f_{other}")
-
-            for group, marks in GROUP_MARKS.items():
-                axis = marks[0]
-                st.markdown(f"### {group}評価｜2車単（{axis}1着固定）")
-                header()
-                for other in marks[1:]:
-                    oldkeys = carry_keys(group, axis, other)
-                    legacy = {"N":old_value(oldkeys[0]), "H":old_value(oldkeys[1]),
-                              "SUM":old_value(oldkeys[2]), "KSUM":old_value(oldkeys[0])}
-                    carry_bet_records[group][(axis, other)] = carry_entry(
-                        f"{axis}→{other}", f"unified_2t_{group}_{other}", legacy)
-                # 妙味α→無印も同じ表示形式で引継ぎ可能
-                if group == "通常":
-                    st.caption("◎→無印のみ複数点集計のため購入点数を入力します。")
-                    legacy = merged_legacy_unmarked(["unmarked_"+field for field in ()]) if False else {
-                        "N":max(old_value("unmarked_n_◎→無印1"), old_value("unmarked_n_◎→無印2")),
-                        "H":old_value("unmarked_h_◎→無印1")+old_value("unmarked_h_◎→無印2"),
-                        "SUM":old_value("unmarked_sum_◎→無印1")+old_value("unmarked_sum_◎→無印2"),
-                        "KSUM":old_value("unmarked_n_◎→無印1")+old_value("unmarked_n_◎→無印2")}
-                    carry_unmarked["◎→無印"] = carry_entry("◎→無印", "unified_2t_normal_unmarked", legacy, multi=True)
-
-            st.markdown("### 2車単｜妙味評価（ε軸・過去分引継ぎ）")
-            st.caption("ε軸の過去成績は、既存のα軸集計からは復元できません。確認できる過去データだけ入力してください。")
-            header()
-            for other in ("α", "β", "γ", "Ω"):
-                carry_epsilon_exacta[other] = carry_entry(
-                    f"ε→{other}", f"epsilon_carry_2t_{other}")
-            st.form_submit_button("前日までの集計を反映")
-    st.download_button(
-        "日次＋引継ぎをまとめてバックアップ（JSON）",
-        data=json.dumps(export_complete_backup(), ensure_ascii=False, indent=2).encode("utf-8"),
-        file_name="velovi_complete_backup.json", mime="application/json",
-        key="velovi_complete_backup_download",
-    )
-    st.caption("バックアップには日次100Rと印着内率、2車単、2車複の引継ぎ入力値を含みます。引継ぎ値の変更後は再度ダウンロードしてください。")
-
-
-# 集計区分は表示とCSVに共通。元の100Rデータには一切手を加えない。
-# β軸専用：日次入力から2車複を実車番で集計（引継ぎには触れない）。
-BETA_PARTNERS = tuple(m for m in (GROUP_MARKS["通常"] + GROUP_MARKS["妙味"]) if m not in ("β", "△"))
-
-def _beta_score(partners, races):
-    n = points = hits = paid = missing = 0
-    hit_details = []
-    for rid, (labels, winners, dividend) in enumerate(races, 1):
-        if "β" not in labels or any(mark not in labels for mark in partners):
-            continue
-        beta = labels["β"]
-        # β自身と同じ車番の相手は購入しない。相手同士も同じ車番なら1点にまとめる。
-        bets = {tuple(sorted((beta, labels[m]))) for m in partners if labels[m] != beta}
-        if not bets:
-            continue
-        n += 1
-        points += len(bets)
-        won = tuple(sorted(winners)) in bets
-        if won:
-            hits += 1
-            if dividend > 0:
-                paid += dividend
-            else:
-                missing += 1
-            hit_details.append(rid)
-    invested = points * 100
-    return {"対象R": n, "購入点数": points, "的中R": hits,
-            "的中率%": pct(hits, n), "投資額": invested, "払戻合計": paid,
-            "収支": paid - invested, "回収率%": pct(paid, invested) if invested else 0,
-            "払戻未入力R": missing}
-
-def _beta_ranking(races, n_partners):
-    rows = []
-    for partners in combinations(BETA_PARTNERS, n_partners):
-        score = _beta_score(partners, races)
-        if score["対象R"] and score["払戻未入力R"] == 0:
-            rows.append({"買い方": "β－" + "・".join(partners), "_partners": partners, **score})
-    return sorted(rows, key=lambda r: (r["回収率%"], r["収支"]), reverse=True)
-
-with tab_result:
-    category = st.radio("集計区分", ("男子（通常）", "ガールズ", "全レース"),
-                        horizontal=True, key="velovi_result_category")
-    st.caption("ガールズにチェックしたレースだけをガールズ集計へ。未チェックは男子として扱います。")
-    session_category = st.radio("開催区分", ("通常開催", "ミッドナイト", "全開催"), horizontal=True, key="velovi_result_session")
-    st.caption("入力時に『ミッドナイト』へチェックしたレースだけを分離します。未チェックは通常開催です。旧データの開催区分も引き継ぎます。")
-
-# 引継ぎの過去数値には男女区分がないため、区分別集計には絶対に混ぜない。
-# 全レースを選んだときのみ従来どおり引継ぎを合算する。
-if category != "全レース" or session_category != "全開催":
-    carry_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
-    carry_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
-    carry_unmarked = {name: blank_unmarked() for name in carry_unmarked}
-    carry_quinella_all = {g: {} for g in GROUP_MARKS}
-    carry_quinella_named = {}
-    carry_epsilon_exacta = {m: blank_bet() for m in ("α", "β", "γ", "Ω")}
-    carry_epsilon_quinella = {m: blank_bet() for m in ("β", "γ", "Ω")}
-
-selected_daily_rows = [r for r in daily_rows
-                       if category == "全レース" or
-                       bool(r.get("girls", False)) == (category == "ガールズ")]
-selected_daily_rows = [r for r in selected_daily_rows
-                       if session_category == "全開催" or
-                       (r.get("session", "デイ") == "ミッドナイト") == (session_category == "ミッドナイト")]
-
-# 区分別引継ぎは集計区分に一致するものだけを合算する。
-def _scoped_values(scope_id):
-    prefix = f"scopedcarry_{scope_id}_"
-    def value(key):
-        return int(st.session_state.get(prefix + key, 0) or 0)
-    marks = {g: {m: {"N":value(f"mark_{g}_{m}_n"), "C1":value(f"mark_{g}_{m}_c1"),
-                       "C2":value(f"mark_{g}_{m}_c2"), "C3":value(f"mark_{g}_{m}_c3")}
-                 for m in GROUP_MARKS[g]} for g in GROUP_MARKS}
-    def bet(kind, axis, target):
-        code=f"{kind}_{axis}_{target}"
-        n=value(code+"_n")
-        return {"N":n, "KSUM":value(code+"_points") if target == "無印" else n,
-                "H":value(code+"_h"), "SUM":value(code+"_sum")}
-    return marks, bet
-
-_scope_ids = []
-for _g, _sid in ((False,"boy_day"),(False,"boy_mid"),(True,"girl_day"),(True,"girl_mid")):
-    if category != "全レース" and (category == "ガールズ") != _g:
-        continue
-    if session_category != "全開催" and (session_category == "ミッドナイト") != _sid.endswith("mid"):
-        continue
-    _scope_ids.append(_sid)
-
-# 区分別引継ぎを既存の累積レコードに反映。
-for _sid in _scope_ids:
-    _marks, _bet = _scoped_values(_sid)
-    for _g in GROUP_MARKS:
-        for _m in GROUP_MARKS[_g]:
-            carry_mark_records[_g][_m] = add_records(carry_mark_records[_g][_m], _marks[_g][_m], ("N","C1","C2","C3"))
-    for _m in ("○","▲","△","×"):
-        _key=("◎",_m)
-        carry_bet_records["通常"][_key] = add_records(carry_bet_records["通常"][_key], _bet("2車単","◎",_m), ("N","H","SUM","KSUM"))
-    for _m in ("β","γ","ε","Ω"):
-        _key=("α",_m)
-        carry_bet_records["妙味"][_key] = add_records(carry_bet_records["妙味"][_key], _bet("2車単","α",_m), ("N","H","SUM","KSUM"))
-    for _m in ("α","β","γ","Ω"):
-        carry_epsilon_exacta[_m] = add_records(carry_epsilon_exacta[_m], _bet("2車単","ε",_m), ("N","H","SUM","KSUM"))
-    for _m in ("○","▲","△","×","無印","β","ε"):
-        _label="◎－無印合計" if _m == "無印" else "◎－"+_m
-        carry_quinella_named[_label] = add_records(carry_quinella_named.get(_label,blank_bet()), _bet("2車複","◎",_m), ("N","H","SUM","KSUM"))
-    for _m in ("β","γ","ε","Ω"):
-        _pair=("α",_m)
-        carry_quinella_all["妙味"][_pair] = add_records(carry_quinella_all["妙味"].get(_pair,blank_bet()), _bet("2車複","α",_m), ("N","H","SUM","KSUM"))
-    for _m in ("β","γ","Ω"):
-        carry_epsilon_quinella[_m] = add_records(carry_epsilon_quinella[_m], _bet("2車複","ε",_m), ("N","H","SUM","KSUM"))
-
-# ============================================================
-# C. 日次集計（除外・部分入力・払い戻しチェック）
-# ============================================================
-daily_mark_records = {g: blank_group_marks(g) for g in GROUP_MARKS}
-daily_bet_records = {g: blank_group_bets(g) for g in GROUP_MARKS}
-daily_epsilon_exacta = {m: blank_bet() for m in ("α", "β", "γ", "Ω")}
-daily_final_2f = {m: blank_bet() for m in "ABCD"}
-daily_final_2t = {m: blank_bet() for m in "ABCD"}
-# 通常◎○と妙味αεの4車BOX。レース別データからのみ計算する。
-daily_mixed_box = blank_bet()
-daily_alt_box = blank_bet()
-daily_alt_box_skips = 0
-daily_alt_box_missing = 0
-daily_mixed_box_skips = 0
-daily_mixed_box_missing = 0
-daily_final_marks = {m: blank_mark() for m in ("ε", "A", "B", "C", "D")}
-daily_unmarked = {name: blank_unmarked() for name in ("◎→×", "◎→無印1", "◎→無印2")}
-daily_quinella = {name: blank_bet() for name in ('◎－○', '◎－▲', '◎－△', '◎－×', '◎－無印合計', '◎－β', '◎－ε')}
-quinella_missing_payouts = 0
-# 全2車複：通常／妙味それぞれの5印＋残り無印を全組み合わせで検証。
-# 集計は日次入力のみ。引継ぎの集計値から未記録の組み合わせは復元できない。
-quinella_all_records = {g: {} for g in GROUP_MARKS}
-quinella_all_races = {g: 0 for g in GROUP_MARKS}
-quinella_all_missing = {g: 0 for g in GROUP_MARKS}
-quinella_all_order = {g: list(GROUP_MARKS[g]) + ["無印1", "無印2"] for g in GROUP_MARKS}
-valid_races = {g: 0 for g in GROUP_MARKS}
-excluded_races = 0
-warnings: List[str] = []
-race_details: List[Dict] = []
-
-for entry in selected_daily_rows:
-    rid = str(entry["race"]).strip()
-    raw_normal = str(entry["normal"]).strip()
-    raw_alpha = str(entry["alpha"]).strip()
-    raw_finish = str(entry["finish"]).strip()
-    payout = int(entry["pay"])
-    quinella_pay = int(entry.get("quinella_pay", 0))
-    field_size = int(entry["field_size"])
-    exclude = bool(entry["exclude"])
-
-    if not any([raw_normal, raw_alpha, raw_finish, payout > 0, quinella_pay > 0, exclude]):
-        continue
-
-    if exclude:
-        excluded_races += 1
-        race_details.append({
-            "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
-            "着順": raw_finish, "2車単払戻": payout,
-            "集計除外": "除外", "通常的中": "集計除外", "妙味的中": "集計除外"
-        })
-        continue
-
-    finish = parse_finish(raw_finish)
-    if len(finish) < 3:
-        warnings.append(f"R{rid}: 着順は3着まで入力してください。例 463 / 4-6-3")
-        continue
-
-    detail = {
-        "R": rid, "通常印順": raw_normal, "妙味印順": raw_alpha,
-        "着順": "-".join(finish[:3]), "2車単払戻": payout,
-        "集計除外": "", "◎→×無無": "未集計"
-    }
-    for group, raw in (("通常", raw_normal), ("妙味", raw_alpha)):
-        if not raw:
-            detail[f"{group}的中"] = "未入力"
-            continue
-        marks = parse_markline(raw, group)
-        if not marks:
-            warnings.append(f"R{rid}: {group}印順は4車または5車、重複なしで入力してください。")
-            detail[f"{group}的中"] = "入力不正"
-            continue
-        valid_races[group] += 1
-
-        # 印別の1着、2着、3着回数。
-        # 5番目の印が省略された場合、その印だけ対象Nから除外する。
-        car_to_mark = {car: mark for mark, car in marks.items()}
-        for mark in marks:
-            daily_mark_records[group][mark]["N"] += 1
-        for pos, car in enumerate(finish[:3], 1):
-            mark = car_to_mark.get(car)
-            if mark:
-                daily_mark_records[group][mark][f"C{pos}"] += 1
-
-        # 2車単は軸1着固定のみ。
-        hits = []
-        for a, b in BET_PAIRS[group]:
-            if a not in marks or b not in marks:
-                continue
-            rec = daily_bet_records[group][(a, b)]
-            rec["N"] += 1
-            rec["KSUM"] += 1
-            if finish[0] == marks[a] and finish[1] == marks[b]:
-                rec["H"] += 1
-                rec["SUM"] += payout
-                hits.append(f"{a}→{b}")
-                if payout <= 0:
-                    warnings.append(f"R{rid}: {group} {a}→{b} 的中ですが払戻が0です。")
-        if group == "妙味" and "ε" in marks:
-            for other, rec in daily_epsilon_exacta.items():
-                if other not in marks or marks[other] == marks["ε"]:
-                    continue
-                rec["N"] += 1
-                rec["KSUM"] += 1
-                if finish[0] == marks["ε"] and finish[1] == marks[other]:
-                    rec["H"] += 1
-                    rec["SUM"] += payout
-                    if payout <= 0:
-                        warnings.append(f"R{rid}: ε→{other} 的中ですが2車単払戻が未入力です。")
-        detail[f"{group}的中"] = " / ".join(hits) if hits else "なし"
-        if group == "通常":
-            # 5印のあるレースだけ、残る車番を無印として確定する。
-            # 6車なら無印1車、7車なら無印2車。4印では判定しない。
-            if len(marks) == 5 and all(1 <= int(v) <= field_size for v in marks.values()) and all(1 <= int(v) <= field_size for v in finish):
-                unknown = sorted(set(str(v) for v in range(1, field_size + 1)) - set(marks.values()), key=int)
-                targets = [("◎→×", marks["×"])] + [(f"◎→無印{i}", car) for i, car in enumerate(unknown, 1)]
-                if len(unknown) == field_size - 5:
-                    hit_names = []
-                    for name, second_car in targets:
-                        if name not in daily_unmarked:
-                            continue
-                        rec_u = daily_unmarked[name]
-                        rec_u["N"] += 1
-                        rec_u["KSUM"] += 1
-                        if finish[0] == marks["◎"] and finish[1] == second_car:
-                            rec_u["H"] += 1
-                            rec_u["SUM"] += payout
-                            hit_names.append(name)
-                            if payout <= 0:
-                                warnings.append(f"R{rid}: {name}的中ですが払戻が0です。")
-                    detail["◎→×無無"] = " / ".join(hit_names) if hit_names else "なし"
-            elif len(marks) == 4:
-                detail["◎→×無無"] = "×未入力・対象外"
-            else:
-                warnings.append(f"R{rid}: 車数と車番が一致しないため◎→×無無を集計しません。")
-                detail["◎→×無無"] = "車数不一致・対象外"
-    # 2車複・全通り：各評価の5印＋無印1・2で全21通り（6車なら15通り）。
-    # 無印1・2は、その評価で印のない車番を小さい順に割り当てる。
-    # 同一レースで各評価は別集計。的中は1組のみで、払戻は2車複入力を使う。
-    for q_group, q_raw in (("通常", raw_normal), ("妙味", raw_alpha)):
-        q_all_marks = parse_markline(q_raw, q_group) if q_raw else {}
-        if len(q_all_marks) != 5 or not all(1 <= int(v) <= field_size for v in q_all_marks.values()):
-            continue
-        if not all(1 <= int(v) <= field_size for v in finish[:2]):
-            continue
-        q_remaining = sorted(set(str(v) for v in range(1, field_size + 1)) - set(q_all_marks.values()), key=int)
-        if len(q_remaining) != field_size - 5:
-            continue
-        q_labeled = dict(q_all_marks)
-        q_labeled.update({f"無印{i}": car for i, car in enumerate(q_remaining, 1)})
-        q_order = [label for label in quinella_all_order[q_group] if label in q_labeled]
-        quinella_all_races[q_group] += 1
-        for left, right in combinations(q_order, 2):
-            key = (left, right)
-            rec = quinella_all_records[q_group].setdefault(key, blank_bet())
-            rec["N"] += 1
-            rec["KSUM"] += 1
-            if {q_labeled[left], q_labeled[right]} == set(finish[:2]):
-                rec["H"] += 1
-                if quinella_pay > 0:
-                    rec["SUM"] += quinella_pay
-                else:
-                    quinella_all_missing[q_group] += 1
-                    warnings.append(f"R{rid}: {q_group}2車複 {left}－{right} 的中ですが払戻未入力です。")
-
-    # 2車複：通常印4～5車、妙味印4～5車。車番が重なる買い目も分類ごとに独立検証。
-    q_marks = parse_markline(raw_normal, "通常") if raw_normal else {}
-    q_value_marks = parse_markline(raw_alpha, "妙味") if raw_alpha else {}
-    q_valid = (len(q_marks) in (4, 5) and "◎" in q_marks
-               and all(1 <= int(v) <= field_size for v in q_marks.values()))
-    if q_valid:
-        q_axis = q_marks["◎"]
-        q_unmarked = sorted(set(str(v) for v in range(1, field_size + 1)) - set(q_marks.values()), key=int)
-        q_pairs = [(f"◎－{mark}", q_marks[mark]) for mark in ("○", "▲", "△", "×") if mark in q_marks]
-        q_pairs += [("◎－無印合計", car) for car in q_unmarked]
-        if len(q_value_marks) in (4, 5):
-            q_pairs += [(f"◎－{mark}", q_value_marks[mark]) for mark in ("β", "ε") if mark in q_value_marks]
-        q_results = {name: False for name in daily_quinella}
-        for q_label, q_other in q_pairs:
-            if q_axis == q_other or not 1 <= int(q_other) <= field_size:
-                continue
-            q_rec = daily_quinella[q_label]
-            q_rec["N"] += 1
-            q_rec["KSUM"] += 1
-            if {q_axis, q_other} == set(finish[:2]):
-                q_rec["H"] += 1
-                q_results[q_label] = True
-                if quinella_pay > 0:
-                    q_rec["SUM"] += quinella_pay
-                else:
-                    quinella_missing_payouts += 1
-                    warnings.append(f"R{rid}: 2車複{q_label}が的中していますが、2車複払戻が未入力です。")
-        for q_label in daily_quinella:
-            detail[f"2車複 {q_label}"] = "的中" if q_results[q_label] else "外れ・対象外"
-    else:
-        for q_label in daily_quinella:
-            detail[f"2車複 {q_label}"] = "印不足・対象外"
-    # 2車複BOX：◎・○・α・ε。重複車番を除き、成立点数で集計。
-    if (len(q_marks) in (4, 5) and len(q_value_marks) in (4, 5)
-            and all(mark in q_marks for mark in ("◎", "○"))
-            and all(mark in q_value_marks for mark in ("α", "ε"))):
-        box_cars = [q_marks["◎"], q_marks["○"], q_value_marks["α"], q_value_marks["ε"]]
-        if all(1 <= int(car) <= field_size for car in box_cars):
-            unique_cars = set(box_cars)
-            points = len(unique_cars) * (len(unique_cars) - 1) // 2
-            if points > 0:
-                daily_mixed_box["N"] += 1
-                daily_mixed_box["KSUM"] += points
-                detail["2車複 ◎○αεBOX点数"] = points
-                if set(finish[:2]).issubset(unique_cars):
-                    daily_mixed_box["H"] += 1
-                    if quinella_pay > 0:
-                        daily_mixed_box["SUM"] += quinella_pay
-                    else:
-                        daily_mixed_box_missing += 1
-                        warnings.append(f"R{rid}: ◎○αεBOX的中ですが2車複払戻が未入力です。")
-                    detail["2車複 ◎○αεBOX"] = "的中"
-                else:
-                    detail["2車複 ◎○αεBOX"] = "外れ"
-            else:
-                daily_mixed_box_skips += 1
-                detail["2車複 ◎○αεBOX"] = "成立点数なし・対象外"
+        except (ValueError,TypeError,KeyError,UnicodeError) as e:
+            st.error(str(e))
+    st.subheader("日次データを引継ぎに確定")
+    st.caption("日次100件の有効レースを区分別の累積に加え、日次を空欄にします。バックアップしてから実施してください。同じ日次データを二重確定しない設計です。")
+    confirm=st.checkbox("日次を引継ぎへ移し、日次欄を消去することを確認しました",key="pv1_confirm_roll")
+    if st.button("日次を引継ぎに確定してクリア",disabled=not confirm):
+        details=[];errs=[]
+        for row in st.session_state["planet_daily_rows_v1"]:
+            d,ws=process(row)
+            errs.extend(ws)
+            if d: details.append(d)
+        if errs:
+            st.error("不正入力・配当未入力があります。引継ぎを中止しました。集計結果の警告を確認してください。")
+        elif not details:
+            st.info("確定するレースがありません")
         else:
-            daily_mixed_box_skips += 1
-            detail["2車複 ◎○αεBOX"] = "車番不正・対象外"
-    else:
-        detail["2車複 ◎○αεBOX"] = "印不足・対象外"
-    # 比較BOX：○・ε・α・γ。既存BOXと同一レース・同一払戻で比較。
-    if (len(q_marks) in (4, 5) and len(q_value_marks) in (4, 5)
-            and "○" in q_marks and all(m in q_value_marks for m in ("ε", "α", "γ"))):
-        alt_cars = [q_marks["○"], q_value_marks["ε"], q_value_marks["α"], q_value_marks["γ"]]
-        if all(1 <= int(car) <= field_size for car in alt_cars):
-            alt_unique = set(alt_cars)
-            alt_points = len(alt_unique) * (len(alt_unique) - 1) // 2
-            if alt_points > 0:
-                daily_alt_box["N"] += 1
-                daily_alt_box["KSUM"] += alt_points
-                detail["2車複 ○εαγBOX点数"] = alt_points
-                if set(finish[:2]).issubset(alt_unique):
-                    daily_alt_box["H"] += 1
-                    if quinella_pay > 0:
-                        daily_alt_box["SUM"] += quinella_pay
-                    else:
-                        daily_alt_box_missing += 1
-                        warnings.append(f"R{rid}: ○εαγBOX的中ですが2車複払戻が未入力です。")
-                    detail["2車複 ○εαγBOX"] = "的中"
-                else:
-                    detail["2車複 ○εαγBOX"] = "外れ"
-            else:
-                daily_alt_box_skips += 1
-                detail["2車複 ○εαγBOX"] = "成立点数なし・対象外"
-        else:
-            daily_alt_box_skips += 1
-            detail["2車複 ○εαγBOX"] = "車番不正・対象外"
-    else:
-        detail["2車複 ○εαγBOX"] = "印不足・対象外"
-    # 最終総合評価 εABCD：妙味評価とは独立した任意入力。
-    final_raw = clean_digits(entry.get("epsilon_final", ""))
-    if final_raw:
-        if len(final_raw) != 5 or len(set(final_raw)) != 5 or "0" in final_raw or any(int(x)>field_size for x in final_raw):
-            warnings.append(f"R{rid}: 最終総合評価εABCDは異なる5車番で入力してください。")
-        else:
-            final_map=dict(zip(("ε","A","B","C","D"),final_raw))
-            for m,car in final_map.items():
-                daily_final_marks[m]["N"]+=1
-                if car in finish[:3]:
-                    daily_final_marks[m][f"C{finish.index(car)+1}"]+=1
-            for m in "ABCD":
-                if {final_map["ε"],final_map[m]} == set(finish[:2]):
-                    daily_final_2f[m]["H"]+=1
-                    daily_final_2f[m]["SUM"]+=quinella_pay
-                daily_final_2f[m]["N"]+=1
-                daily_final_2f[m]["KSUM"]+=1
-                if finish[0]==final_map["ε"] and finish[1]==final_map[m]:
-                    daily_final_2t[m]["H"]+=1
-                    daily_final_2t[m]["SUM"]+=payout
-                daily_final_2t[m]["N"]+=1
-                daily_final_2t[m]["KSUM"]+=1
-    race_details.append(detail)
+            for scope in SCOPES:
+                summary=from_details([d for d in details if d["区分"]==scope])
+                add_summary(st.session_state["planet_carry_v1"][scope],summary)
+            st.session_state["planet_daily_rows_v1"]=[initial_row(i) for i in range(1,101)]
+            clear_widget_cache()
+            st.success(f"{len(details)}Rを引継ぎました。新しい完全バックアップを保存してください。")
+            st.rerun()
+    st.subheader("引継ぎ累積の確認")
+    for scope in SCOPES:
+        with st.expander(scope):
+            s=st.session_state["planet_carry_v1"][scope]
+            st.caption(f"引継ぎ対象レース：{s['race_count']}R")
+            st.dataframe(bet_table(s),hide_index=True,use_container_width=True)
+            st.dataframe(mark_table(s),hide_index=True,use_container_width=True)
 
-
-# ============================================================
-# D. 累積 = 引継ぎ + 日次
-# ============================================================
-total_mark_records = {}
-total_bet_records = {}
-for group, marks in GROUP_MARKS.items():
-    total_mark_records[group] = {
-        m: add_records(carry_mark_records[group][m], daily_mark_records[group][m],
-                       ("N", "C1", "C2", "C3")) for m in marks
-    }
-    total_bet_records[group] = {
-        pair: add_records(carry_bet_records[group][pair], daily_bet_records[group][pair],
-                          ("N", "H", "SUM", "KSUM")) for pair in BET_PAIRS[group]
-    }
-
-
-
-total_unmarked = {"◎→×": add_records(carry_unmarked["◎→×"], daily_unmarked["◎→×"], ("N","H","SUM","KSUM"))}
-_daily_um = sum_bets([daily_unmarked["◎→無印1"], daily_unmarked["◎→無印2"]]) if "sum_bets" in globals() else {
-    "N": max(daily_unmarked["◎→無印1"]["N"],daily_unmarked["◎→無印2"]["N"]),
-    "H": sum(daily_unmarked[k]["H"] for k in ("◎→無印1","◎→無印2")),
-    "SUM": sum(daily_unmarked[k]["SUM"] for k in ("◎→無印1","◎→無印2")),
-    "KSUM": sum(daily_unmarked[k]["KSUM"] for k in ("◎→無印1","◎→無印2"))}
-total_unmarked["◎→無印"] = add_records(carry_unmarked["◎→無印"], _daily_um, ("N","H","SUM","KSUM"))
-
-
-def unmarked_summary(records):
-    """◎→×と無印を合計。実際に対象となった点数を分母にする。"""
-    keys = ("◎→×", "◎→無印1", "◎→無印2")
-    n = max(int(records[k]["N"]) for k in keys)
-    ksum = sum(int(records[k]["KSUM"]) for k in keys)
-    h = sum(int(records[k]["H"]) for k in keys)
-    summ = sum(int(records[k]["SUM"]) for k in keys)
-    return {"評価": "通常・穴相手", "3点セット": "◎→×・無印・無印", "対象R": int(n),
-            "購入点数": ksum, "投資額": ksum * 100, "的中数": h,
-            "平均的中配当": round(summ / h, 1) if h else None,
-            "払戻合計": summ, "回収率%": pct(summ, ksum * 100)}
-
-
-def unmarked_frame(records):
-    return pd.DataFrame([bet_row(k, records[k]) for k in ("◎→×", "◎→無印1", "◎→無印2")])
-
-
-def mark_frame(group, records):
-    return pd.DataFrame([mark_row(m, records[group][m]) for m in GROUP_MARKS[group]])
-
-
-def bet_frame(group, records):
-    return pd.DataFrame([
-        bet_row(f"{a}→{b}", records[group][(a, b)]) for a, b in BET_PAIRS[group]
-    ])
-
-
-def set_summary(group, records):
-    """指定3点の実購入点数合計から回収率を算出。欠損印は対象外。"""
-    axis = GROUP_AXES[group]
-    selected = [records[group][(axis, m)] for m in SET_TARGETS[group]]
-    n = min(int(r["N"]) for r in selected) if selected else 0
-    ksum = sum(int(r["KSUM"]) for r in selected)
-    h = sum(int(r["H"]) for r in selected)
-    summ = sum(int(r["SUM"]) for r in selected)
-    return {
-        "評価": group,
-        "3点セット": f"{axis}→{'・'.join(SET_TARGETS[group])}",
-        "対象R": int(n),
-        "購入点数": ksum,
-        "投資額": ksum * 100,
-        "的中数": h,
-        "払戻合計": summ,
-        "平均的中配当": round(summ / h, 1) if h else None,
-        "回収率%": pct(summ, ksum * 100),
-    }
-
-
-# ============================================================
-# E. 結果・CSV・本日分・レース別判定
-# ============================================================
-# 累積：既存の日次集計に過去引継ぎを加算（入力済みの過去分を二重に入れないこと）。
-quinella_all_total = {g:{} for g in GROUP_MARKS}
-for g in GROUP_MARKS:
-    for pair in set(quinella_all_records[g]) | set(carry_quinella_all[g]):
-        quinella_all_total[g][pair] = add_records(quinella_all_records[g].get(pair, blank_bet()), carry_quinella_all[g].get(pair, blank_bet()), ("N","H","SUM","KSUM"))
-# ε軸2車複の引継ぎを累積に反映。α－εは既存のα軸入力を共用。
-# 組み合わせキーは全組み合わせ集計と同じ並び順に揃える。
-for other, pair in (("β", ("β", "ε")), ("γ", ("γ", "ε")), ("Ω", ("ε", "Ω"))):
-    quinella_all_total["妙味"][pair] = add_records(
-        quinella_all_total["妙味"].get(pair, blank_bet()),
-        carry_epsilon_quinella[other], ("N", "H", "SUM", "KSUM"))
-
-# 「全21組」と「記号別比較」のどちらに前日分を入力しても◎軸累積へ反映。
-# 同一買い目の二重加算を防止するため、記号別比較が入力済みなら優先する。
-def sum_bets(records):
-    """同じ軸からの異なる買い目を各100円ずつ購入した合算。"""
-    selected = list(records)
-    if not selected:
-        return blank_bet()
-    return {"N": max(int(r["N"]) for r in selected),
-            "KSUM": sum(int(r["KSUM"]) for r in selected),
-            "H": sum(int(r["H"]) for r in selected),
-            "SUM": sum(int(r["SUM"]) for r in selected)}
-
-
-def past_named_quinella(label):
-    return carry_quinella_named.get(label, blank_bet())
-
-quinella_named_total = {
-    name: add_records(daily_quinella[name], past_named_quinella(name), ("N", "H", "SUM", "KSUM"))
-    for name in daily_quinella
-}
-def compact_result(name, rec):
-    """結果一覧に必要な項目だけを表示。的中率は対象R基準。"""
-    r = bet_row(name, rec)
-    return {"買い方": name, "対象R": r["対象R"], "購入点数": r["購入点数"],
-            "的中R": r["的中数"], "的中率%": r["的中率%"],
-            "投資額": r["投資額"], "払戻合計": r["払戻合計"],
-            "収支": r["払戻合計"] - r["投資額"], "回収率%": r["回収率%"]}
-
-
-
-
-
-# ε軸2車単は独立集計。2車複はα軸全組み合わせから同一車券を再利用。
-total_epsilon_exacta = {
-    m: add_records(carry_epsilon_exacta[m], daily_epsilon_exacta[m],
-                   ("N", "H", "SUM", "KSUM"))
-    for m in ("α", "β", "γ", "Ω")
-}
-
-# ============================================================
-# 4車BOX全探索：レース別入力のみ。既存集計・引継ぎには干渉しない。
-# ============================================================
-BOX_LABELS = tuple(GROUP_MARKS["通常"]) + tuple(GROUP_MARKS["妙味"])
-BOX_COMBINATIONS = list(combinations(BOX_LABELS, 4))  # 10C4 = 210
-BOX_COMBINATIONS_3 = list(combinations(BOX_LABELS, 3))  # 10C3 = 120
-
-def _box_race_inputs(rows):
-    result = []
-    for row in rows:
-        if row.get("exclude"):
-            continue
-        normal = parse_markline(row.get("normal", ""), "通常")
-        value = parse_markline(row.get("alpha", ""), "妙味")
-        finish = parse_finish(row.get("finish", ""))
-        field = int(row.get("field_size", 7))
-        if len(finish) < 2 or len(set(finish[:2])) != 2:
-            continue
-        if not all(1 <= int(c) <= field for c in finish[:2]):
-            continue
-        # 4印・5印どちらも使用可能。欠損印を含むBOXはそのRを対象外にする。
-        labels = {**normal, **value}
-        if not labels:
-            continue
-        if any(not 1 <= int(car) <= field for car in labels.values()):
-            continue
-        result.append((labels, set(finish[:2]), int(row.get("quinella_pay", 0))))
-    return result
-
-def _box_score(combo, races):
-    n = points = hits = paid = missing = 0
-    for labels, winners, dividend in races:
-        if not all(mark in labels for mark in combo):
-            continue
-        cars = {labels[mark] for mark in combo}
-        k = len(cars) * (len(cars) - 1) // 2
-        if not k:
-            continue
-        n += 1
-        points += k
-        if winners.issubset(cars):
-            hits += 1
-            if dividend > 0:
-                paid += dividend
-            else:
-                missing += 1
-    invested = points * 100
-    return {"対象R":n, "購入点数":points, "的中R":hits,
-            "的中率%":pct(hits,n), "投資額":invested, "払戻合計":paid,
-            "収支":paid-invested, "回収率%":pct(paid,invested),
-            "払戻未入力R":missing}
-
-def _box_point_breakdown(combo, races):
-    """日次入力分だけを数え、重複による実購入点数の内訳を返す。"""
-    breakdown = {"6点": 0, "3点": 0, "1点": 0, "対象外": 0}
-    for labels, winners, dividend in races:
-        if not all(mark in labels for mark in combo):
-            breakdown["対象外"] += 1
-            continue
-        unique_count = len({labels[mark] for mark in combo})
-        points = unique_count * (unique_count - 1) // 2
-        if points:
-            breakdown[f"{points}点"] += 1
-        else:
-            breakdown["対象外"] += 1
-    return breakdown
-
-def _box_ranking(races, minimum, combinations_to_check=None):
-    if combinations_to_check is None:
-        combinations_to_check = BOX_COMBINATIONS
-    result = []
-    for combo in combinations_to_check:
-        score = _box_score(combo, races)
-        if score["対象R"] >= minimum and score["払戻未入力R"] == 0:
-            result.append({"BOX":"・".join(combo), "_combo":combo, **score})
-    return sorted(result, key=lambda x:(x["回収率%"] or -1, x["収支"]), reverse=True)
-
-with tab_result:
-    st.subheader(f"印着内率【{category}】")
-    if category != "全レース" or session_category != "全開催":
-        st.info("この区分の成績はレース別入力のみから集計しています。区分のない過去引継ぎ値は含めていません。")
-    st.caption(f"選択区分の有効入力：通常{valid_races['通常']}R／妙味{valid_races['妙味']}R・除外{excluded_races}R。過去引継ぎは全レース・全開催表示時のみ加算。")
-    for group in GROUP_MARKS:
-        st.markdown(f"**{group}評価**")
-        show_full_table(mark_frame(group, total_mark_records).style.format({
-            "1着率%": "{:.1f}", "連対率%": "{:.1f}", "印着内率%": "{:.1f}"
-        }, na_rep="—"))
-
-    st.markdown("**最終総合評価 εABCD｜日次入力分**")
-    st.caption("独立した最終評価の入力があるレースだけ集計。前日引継ぎの妙味ε軸とは混同しません。")
-    show_full_table(pd.DataFrame([mark_row(m,daily_final_marks[m]) for m in ("ε","A","B","C","D")]))
-    st.subheader("2車複｜4車BOX比較【日次入力分】")
-    st.caption("◎○αε と ○εαγ を同じ日次入力から比較。重複車番を除き、4車6点・3車3点・2車1点（各100円）。引継ぎの買い目別累積値は含めません。")
-    box_result = compact_result("◎・○・α・ε BOX（可変点数）", daily_mixed_box)
-    alt_box_result = compact_result("○・ε・α・γ BOX（可変点数）", daily_alt_box)
-    show_full_table(style_roi(pd.DataFrame([box_result, alt_box_result])))
-    st.caption(f"◎○αε：対象外{daily_mixed_box_skips}R・的中払戻未入力{daily_mixed_box_missing}R ／ ○εαγ：対象外{daily_alt_box_skips}R・的中払戻未入力{daily_alt_box_missing}R")
-    st.subheader("2車複｜4車BOX自動探索（全210通り）")
-    st.caption("現在の日次入力に保存済みのレースだけを使用。前日引継ぎ・累積値は一切使用しません。重複車番は1車とし、実購入点数（1・3・6点）で集計します。")
-    box_races = _box_race_inputs(selected_daily_rows)
-    st.caption(f"今回の探索対象：日次入力 {len(box_races)}R（除外・着順未入力・印不正のレースを除く）")
-    if len(box_races) < 2:
-        st.info("探索には2R以上の有効なレース別入力が必要です。")
-    else:
-        col_a, col_b = st.columns(2)
-        min_sample = col_a.number_input("最低対象レース数", min_value=1, max_value=len(box_races), value=min(20, len(box_races)), step=1, key="box_search_min_r")
-        train_pct = col_b.slider("探索用データ割合（前半）", 50, 90, 70, 5, key="box_search_train_pct")
-        all_rank = _box_ranking(box_races, int(min_sample))
-        st.markdown("**全期間の成績順（参考：過去への当てはめ）**")
-        if all_rank:
-            display_cols = ["BOX","対象R","購入点数","的中R","的中率%","投資額","払戻合計","収支","回収率%"]
-            full_frame = pd.DataFrame(all_rank)
-            show_full_table(style_roi(full_frame[display_cols].head(30)))
-            with st.expander("4車BOX上位30組：購入点数の内訳（日次のみ）"):
-                breakdown_rows = []
-                for item in all_rank[:30]:
-                    breakdown_rows.append({"BOX": item["BOX"], **_box_point_breakdown(item["_combo"], box_races)})
-                show_full_table(pd.DataFrame(breakdown_rows))
-            st.download_button("全210通りの集計CSV", data=full_frame.drop(columns=["_combo"]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_box_all_combinations.csv", mime="text/csv", key="box_search_all_csv")
-        else:
-            st.info("条件を満たすBOXがありません。最低対象レース数を減らしてください。")
-        split = max(1, min(len(box_races)-1, int(len(box_races)*train_pct/100)))
-        train, test = box_races[:split], box_races[split:]
-        train_rank = _box_ranking(train, min(int(min_sample),len(train)))
-        st.markdown(f"**前半{len(train)}Rで候補を選び、後半{len(test)}Rで検証**")
-        st.caption("日次入力欄の並び順が古い→新しい順であることが前提です。後半の成績は候補選定に使用しません。")
-        if train_rank:
-            compared=[]
-            for item in train_rank[:10]:
-                out=_box_score(item["_combo"],test)
-                compared.append({"BOX":item["BOX"], "前半回収率%":item["回収率%"], "前半収支":item["収支"],
-                    "後半対象R":out["対象R"], "後半購入点数":out["購入点数"],
-                    "後半的中R":out["的中R"], "後半収支":out["収支"],
-                    "後半回収率%":out["回収率%"], "後半払戻未入力R":out["払戻未入力R"]})
-            show_full_table(pd.DataFrame(compared))
-            st.caption("後半での黒字は将来の利益を保証しません。34R程度では探索候補が偶然高回収率になる危険が大きく、実購入前の追加検証が必要です。")
-        else:
-            st.info("前半データで条件を満たすBOXがありません。")
-        missing_races=sum(1 for _,_,dividend in box_races if dividend == 0)
-        if missing_races:
-            st.warning(f"2車複払戻0円の入力が{missing_races}Rあります。的中時の払戻未入力を含むBOXはランキングから除外しています。")
-    st.subheader("2車複｜3車BOX自動探索（全120通り）")
-    st.caption("現在の日次入力に保存済みのレースだけを使用（引継ぎなし）。3印の実車番を重複除去し、3車3点・2車1点。1車のみは対象外。")
-    if len(box_races) < 2:
-        st.info("探索には2R以上の有効なレース別入力が必要です。")
-    else:
-        rank3 = _box_ranking(box_races, int(min_sample), BOX_COMBINATIONS_3)
-        st.markdown("**全期間の成績順（参考：過去への当てはめ）**")
-        if rank3:
-            cols3 = ["BOX", "対象R", "購入点数", "的中R", "的中率%", "投資額", "払戻合計", "収支", "回収率%"]
-            frame3 = pd.DataFrame(rank3)
-            show_full_table(style_roi(frame3[cols3].head(30)))
-            with st.expander("3車BOX上位30組：購入点数の内訳（日次のみ）"):
-                breakdown_rows3 = []
-                for item in rank3[:30]:
-                    breakdown_rows3.append({"BOX": item["BOX"], **_box_point_breakdown(item["_combo"], box_races)})
-                show_full_table(pd.DataFrame(breakdown_rows3))
-            st.download_button("全120通り・3車BOX集計CSV", data=frame3.drop(columns=["_combo"]).to_csv(index=False).encode("utf-8-sig"), file_name="velovi_box_3car_all.csv", mime="text/csv", key="box_search_3car_csv")
-        else:
-            st.info("条件を満たす3車BOXがありません。")
-        train3 = _box_ranking(train, min(int(min_sample), len(train)), BOX_COMBINATIONS_3)
-        st.markdown(f"**前半{len(train)}Rで候補を選び、後半{len(test)}Rで検証**")
-        st.caption("4車BOXと同じ前半割合・最低対象Rを使用。日次入力順が古い→新しい順であることが前提です。")
-        if train3:
-            comparison3 = []
-            for item in train3[:10]:
-                out = _box_score(item["_combo"], test)
-                comparison3.append({"BOX": item["BOX"], "前半回収率%": item["回収率%"], "前半収支": item["収支"], "後半対象R": out["対象R"], "後半購入点数": out["購入点数"], "後半的中R": out["的中R"], "後半収支": out["収支"], "後半回収率%": out["回収率%"], "後半払戻未入力R": out["払戻未入力R"]})
-            show_full_table(pd.DataFrame(comparison3))
-        else:
-            st.info("前半データで条件を満たす3車BOXがありません。")
-        st.caption("3車BOXも全120通りを探索するため、過去の高回収率には偶然の上振れが含まれます。")
-    st.subheader("2車複｜β軸・相手別／2点・3点自動探索【日次入力分】")
-    st.caption("βが連対することを前提とする軸買い。3車BOXとは異なり、相手同士の決着は的中しません。現在の日次入力のみで計算し、引継ぎ・過去累積を含みません。")
-    st.caption("△＝αのため、相手候補の△は重複排除しαに統一。βと相手が同車番の場合はその買い目を除外し、相手同士の同車番も重複購入しません。")
-    beta_columns = ["買い方", "対象R", "購入点数", "的中R", "的中率%", "投資額", "払戻合計", "収支", "回収率%"]
-    if not box_races:
-        st.info("β軸集計には日次入力の有効なレースが必要です。")
-    else:
-        for partner_count, label in ((1, "相手1点・全8通り"), (2, "相手2印・全28通り"), (3, "相手3印・全56通り")):
-            st.markdown(f"**β軸：{label}**")
-            beta_rank = _beta_ranking(box_races, partner_count)
-            if beta_rank:
-                beta_frame = pd.DataFrame(beta_rank)
-                show_full_table(style_roi(beta_frame[beta_columns].head(30)))
-                st.download_button(f"β軸{partner_count}印・全組み合わせCSV", data=beta_frame.drop(columns=["_partners"]).to_csv(index=False).encode("utf-8-sig"), file_name=f"velovi_beta_axis_{partner_count}partners_daily.csv", mime="text/csv", key=f"beta_axis_csv_{partner_count}")
-            else:
-                st.info("有効な組み合わせがありません。")
-        if len(box_races) >= 4:
-            split = max(1, min(len(box_races)-1, int(len(box_races)*0.7)))
-            train_beta, test_beta = box_races[:split], box_races[split:]
-            st.markdown(f"**β軸3印：前半{len(train_beta)}Rで選定→後半{len(test_beta)}Rで検証**")
-            selected = _beta_ranking(train_beta, 3)[:10]
-            checked = []
-            for item in selected:
-                out = _beta_score(item["_partners"], test_beta)
-                checked.append({"買い方":item["買い方"], "前半回収率%":item["回収率%"], "前半的中R":item["的中R"], "後半購入点数":out["購入点数"], "後半的中R":out["的中R"], "後半収支":out["収支"], "後半回収率%":out["回収率%"], "後半払戻未入力R":out["払戻未入力R"]})
-            if checked:
-                show_full_table(pd.DataFrame(checked))
-            st.caption("前半・後半は日次入力順による区分です。過去最適化の上振れに注意してください。")
-    st.subheader("2車複｜◎軸・買い目別【累積】")
-    show_full_table(style_roi(pd.DataFrame([
-        compact_result(name, quinella_named_total[name]) for name in daily_quinella_labels
-    ])))
-
-    st.subheader("2車複｜妙味評価 α軸・買い目別【累積】")
-    show_full_table(style_roi(pd.DataFrame([
-        compact_result(f"α－{m}", quinella_all_total["妙味"].get(("α", m), blank_bet()))
-        for m in ("β", "γ", "ε", "Ω")
-    ])))
-
-    st.subheader("2車複｜妙味評価 ε軸・買い目別【累積】")
-    st.caption("ε－αはα－εと同一車券。既存の2車複全組み合わせから参照し、二重集計しません。過去分は既存引継ぎのある組み合わせのみ反映されます。")
-    epsilon_quinella = []
-    for m in ("α", "β", "γ", "Ω"):
-        pair = ("α", "ε") if m == "α" else (m, "ε") if m in ("β", "γ") else ("ε", "Ω")
-        epsilon_quinella.append(compact_result(
-            f"ε－{m}", quinella_all_total["妙味"].get(pair, blank_bet())
-        ))
-    show_full_table(style_roi(pd.DataFrame(epsilon_quinella)))
-
-    st.markdown("**2車複｜最終総合評価 ε軸**")
-    show_full_table(style_roi(pd.DataFrame([compact_result(f"ε－{m}",daily_final_2f[m]) for m in "ABCD"])))
-
-    st.subheader("2車単｜◎軸・買い目別【累積】")
-    normal_exacta_rows = [compact_result(f"◎→{m}", total_bet_records["通常"][("◎", m)])
-                         for m in ("○", "▲", "△", "×")]
-    normal_exacta_rows.append(compact_result("◎→無印", total_unmarked["◎→無印"]))
-    show_full_table(style_roi(pd.DataFrame(normal_exacta_rows)))
-
-    st.subheader("2車単｜妙味評価 α軸・買い目別【累積】")
-    show_full_table(style_roi(pd.DataFrame([
-        compact_result(f"α→{m}", total_bet_records["妙味"][("α", m)])
-        for m in ("β", "γ", "ε", "Ω")
-    ])))
-
-    st.subheader("2車単｜妙味評価 ε軸・買い目別【累積】")
-    show_full_table(style_roi(pd.DataFrame([
-        compact_result(f"ε→{m}", total_epsilon_exacta[m])
-        for m in ("α", "β", "γ", "Ω")
-    ])))
-
-    st.markdown("**2車単｜最終総合評価 ε軸**")
-    show_full_table(style_roi(pd.DataFrame([compact_result(f"ε→{m}",daily_final_2t[m]) for m in "ABCD"])))
-
+with tab_results:
+    division=st.radio("種別",("全レース","男子","ガールズ"),horizontal=True)
+    session_sel=st.radio("開催区分",("全開催","通常開催","ミッドナイト"),horizontal=True)
+    def matched(scope: str) -> bool:
+        return ((division=="全レース" or scope.startswith(division)) and
+                (session_sel=="全開催" or scope.endswith(session_sel)))
+    details=[];warnings=[]
+    for row in st.session_state["planet_daily_rows_v1"]:
+        d,ws=process(row)
+        warnings.extend(ws)
+        if d:details.append(d)
+    chosen=[d for d in details if matched(d["区分"])]
+    total=from_details(chosen)
+    for scope in SCOPES:
+        if matched(scope):add_summary(total,st.session_state["planet_carry_v1"][scope])
+    st.metric("累積対象レース",total["race_count"])
+    st.subheader("惑星理論｜買い目別（複数衛星は一括集計）")
+    st.caption("各方式で1Rに複数点あっても、当たれば的中Rは1。投資は成立した全点数×100円。◎－▲は惑星理論の集計とは別枠です。")
+    bets_frame=bet_table(total)
+    st.dataframe(bets_frame,hide_index=True,use_container_width=True)
+    st.download_button("買い目別集計CSV",bets_frame.to_csv(index=False).encode("utf-8-sig"),file_name="planet_bet_summary.csv",mime="text/csv")
+    st.subheader("通常評価｜印別着内率（惑星理論の車券判定には不使用）")
+    marks_frame=mark_table(total)
+    st.dataframe(marks_frame,hide_index=True,use_container_width=True)
+    st.download_button("印着内率CSV",marks_frame.to_csv(index=False).encode("utf-8-sig"),file_name="planet_mark_summary.csv",mime="text/csv")
     if warnings:
-        st.warning("\n".join(warnings[:25]) + ("\n…" if len(warnings) > 25 else ""))
-    if race_details:
-        with st.expander("本日のレース別判定を確認"):
-            show_full_table(pd.DataFrame(race_details).fillna(""))
-    st.download_button("買い目別集計CSV", data=pd.concat([
-        pd.DataFrame([compact_result(name, quinella_named_total[name]) for name in daily_quinella_labels]).assign(分類="2車複◎"),
-        pd.DataFrame(normal_exacta_rows).assign(分類="2車単◎"),
-        pd.DataFrame([compact_result(f"α－{m}", quinella_all_total["妙味"].get(("α", m), blank_bet())) for m in ("β", "γ", "ε", "Ω")]).assign(分類="2車複α"),
-        pd.DataFrame([compact_result(f"α→{m}", total_bet_records["妙味"][("α", m)]) for m in ("β", "γ", "ε", "Ω")]).assign(分類="2車単α"),
-        pd.DataFrame(epsilon_quinella).assign(分類="2車複ε"),
-        pd.DataFrame([box_result, alt_box_result]).assign(分類="2車複4車BOX（日次のみ）"),
-        pd.DataFrame([compact_result(f"ε→{m}", total_epsilon_exacta[m]) for m in ("α", "β", "γ", "Ω")]).assign(分類="2車単ε"),
-    ], ignore_index=True).to_csv(index=False).encode("utf-8-sig"), file_name=f"velovi_{category}_{session_category}_results.csv", mime="text/csv")
+        st.warning("\n".join(warnings[:30])+("\n…" if len(warnings)>30 else ""))
+    if chosen:
+        st.subheader("日次レース別検証明細")
+        rows=[]
+        for d in chosen:
+            entry={k:v for k,v in d.items() if k not in ("bets","marks")}
+            for bet,rec in d["bets"].items():
+                entry[bet+" 買い目"]=rec["formation"]
+                entry[bet+" 点数"]=rec["points"]
+                entry[bet+" 的中"]="○" if rec["h"] else "×"
+            rows.append(entry)
+        frame=pd.DataFrame(rows)
+        st.dataframe(frame,hide_index=True,use_container_width=True)
+        st.download_button("レース別検証CSV",frame.to_csv(index=False).encode("utf-8-sig"),file_name="planet_daily_details.csv",mime="text/csv")
+    st.caption("旧ヴェロビ集計アプリの履歴や引継ぎ数字を自動移行していません。異なる方式のデータを混ぜないためです。")
