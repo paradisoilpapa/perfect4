@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""惑星理論・独立検証集計 v1
+"""惑星理論・独立検証集計 v2
 
 ヴェロビ予想本体には一切依存しない Streamlit 集計アプリ。
 - 太陽 / 惑星 / 衛星(複数) / 彗星(複数・任意) と 通常評価 ◎○▲△× を入力
 - レース単位で2車複・3連複の的中率、実点数に応じた回収率を算出
 - 衛星は優劣を付けず、惑星－衛星など一括フォーメーションとして判定
-- 彗星は入力・記録するが、2車複・3連複の買い目生成には使用しない
+- 彗星は既存方式には含めず、新規の太陽系／◎▲固定3連複でのみ3車目候補に含める
 - 通常評価の印1着、連対、3着内率および◎－▲の2車複を別枠集計
 - 日次100R (50件ページ)、前日引継ぎ、完全JSONバックアップ、CSV出力
 - 100円均等購入の仮想検証。実購入とは区別する。
@@ -21,10 +21,10 @@ import streamlit as st
 
 st.set_page_config(page_title="惑星理論｜独立検証集計", layout="wide")
 st.title("惑星理論｜独立検証集計")
-st.caption("予想本体とは独立。太陽・惑星・衛星だけで車券を生成し、彗星は記録のみ（買い目から除外）。通常評価は印着内率と◎－▲の検証専用です。すべて1点100円の仮想平買い。")
+st.caption("予想本体とは独立。既存の惑星固定3連複は彗星を除外。追加の太陽系3連複・◎▲固定3連複のみ彗星を3車目候補に含めます。すべて1点100円の仮想平買い。")
 
 MARKS = ("◎", "○", "▲", "△", "×")
-BET_NAMES = ("2車複 太陽－惑星", "2車複 太陽－衛星", "2車複 惑星－衛星", "2車複 ◎－▲（別枠）", "3連複 惑星－（太陽・衛星）－（太陽・衛星）")
+BET_NAMES = ("2車複 太陽－惑星", "2車複 太陽－衛星", "2車複 惑星－衛星", "2車複 ◎－▲（別枠）", "3連複 惑星－（太陽・衛星）－（太陽・衛星）", "3連複 太陽－惑星－（衛星・彗星）", "3連複 ◎－▲－（太陽・惑星・衛星・彗星）")
 SESSIONS = ("モーニング", "デイ", "ナイター", "ミッドナイト")
 SCOPES = ("男子・通常開催", "男子・ミッドナイト", "ガールズ・通常開催", "ガールズ・ミッドナイト")
 
@@ -71,7 +71,7 @@ def trip(a: str, b: str, c: str) -> tuple[str, str, str]:
     return tuple(sorted((a, b, c)))
 
 
-def build_bets(sun: str, planet: str, satellites: list[str], marks: dict[str, str]) -> dict[str, set[tuple]]:
+def build_bets(sun: str, planet: str, satellites: list[str], comets: list[str], marks: dict[str, str]) -> dict[str, set[tuple]]:
     sat = set(satellites)
     pool = sorted({sun, *sat})
     bets = {
@@ -80,9 +80,12 @@ def build_bets(sun: str, planet: str, satellites: list[str], marks: dict[str, st
         BET_NAMES[2]: {pair(planet, s) for s in sat},
         BET_NAMES[3]: set(),
         BET_NAMES[4]: {trip(planet, a, b) for a, b in combinations(pool, 2)},
+        BET_NAMES[5]: {trip(sun, planet, car) for car in set(satellites + comets)},
+        BET_NAMES[6]: set(),
     }
     if "◎" in marks and "▲" in marks and marks["◎"] != marks["▲"]:
         bets[BET_NAMES[3]] = {pair(marks["◎"], marks["▲"])}
+        bets[BET_NAMES[6]] = {trip(marks["◎"], marks["▲"], car) for car in {sun, planet, *satellites, *comets}}
     # 予想本体とは無関係。誤入力などの重複車番を含む組合せは除去。
     return {k: {v for v in group if len(set(v)) == len(v)} for k, group in bets.items()}
 
@@ -120,7 +123,7 @@ def process(row: dict) -> tuple[dict | None, list[str]]:
 
     qresult = pair(finish[0], finish[1])
     tresult = tuple(sorted(finish))
-    bets = build_bets(sun, planet, sat, marks)
+    bets = build_bets(sun, planet, sat, comets, marks)
     detail = {"R": row.get("race", ""), "開催": row.get("session", "デイ"), "区分": scope_for(row),
               "太陽": sun, "惑星": planet, "衛星": "".join(sat), "彗星": "".join(comets), "通常評価": row.get("normal", ""),
               "着順": "-".join(finish), "2車複配当": qpay, "3連複配当": tpay,
@@ -333,7 +336,7 @@ with tab_results:
         if matched(scope):add_summary(total,st.session_state["planet_carry_v1"][scope])
     st.metric("累積対象レース",total["race_count"])
     st.subheader("惑星理論｜買い目別（複数衛星は一括集計）")
-    st.caption("各方式で1Rに複数点あっても、当たれば的中Rは1。投資は成立した全点数×100円。◎－▲は惑星理論の集計とは別枠です。")
+    st.caption("各方式で1Rに複数点あっても、当たれば的中Rは1。投資は全成立点数×100円。従来方式は変更せず、新3連複2方式を独立追加。◎－▲軸方式は通常評価を用いる別枠検証です。")
     bets_frame=bet_table(total)
     st.dataframe(bets_frame,hide_index=True,use_container_width=True)
     st.download_button("買い目別集計CSV",bets_frame.to_csv(index=False).encode("utf-8-sig"),file_name="planet_bet_summary.csv",mime="text/csv")
