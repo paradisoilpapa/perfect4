@@ -2,9 +2,10 @@
 """惑星理論・独立検証集計 v1
 
 ヴェロビ予想本体には一切依存しない Streamlit 集計アプリ。
-- 太陽 / 惑星 / 衛星(複数) と 通常評価 ◎○▲△× を入力
+- 太陽 / 惑星 / 衛星(複数) / 彗星(複数・任意) と 通常評価 ◎○▲△× を入力
 - レース単位で2車複・3連複の的中率、実点数に応じた回収率を算出
 - 衛星は優劣を付けず、惑星－衛星など一括フォーメーションとして判定
+- 彗星は入力・記録するが、2車複・3連複の買い目生成には使用しない
 - 通常評価の印1着、連対、3着内率および◎－▲の2車複を別枠集計
 - 日次100R (50件ページ)、前日引継ぎ、完全JSONバックアップ、CSV出力
 - 100円均等購入の仮想検証。実購入とは区別する。
@@ -20,7 +21,7 @@ import streamlit as st
 
 st.set_page_config(page_title="惑星理論｜独立検証集計", layout="wide")
 st.title("惑星理論｜独立検証集計")
-st.caption("予想本体とは独立。太陽・惑星・衛星だけで車券を生成。通常評価は印着内率と◎－▲の検証専用です。すべて1点100円の仮想平買い。")
+st.caption("予想本体とは独立。太陽・惑星・衛星だけで車券を生成し、彗星は記録のみ（買い目から除外）。通常評価は印着内率と◎－▲の検証専用です。すべて1点100円の仮想平買い。")
 
 MARKS = ("◎", "○", "▲", "△", "×")
 BET_NAMES = ("2車複 太陽－惑星", "2車複 太陽－衛星", "2車複 惑星－衛星", "2車複 ◎－▲（別枠）", "3連複 惑星－（太陽・衛星）－（太陽・衛星）")
@@ -30,7 +31,7 @@ SCOPES = ("男子・通常開催", "男子・ミッドナイト", "ガールズ�
 
 def initial_row(i: int) -> dict:
     return {"race": str(i), "session": "デイ", "girls": False,
-            "sun": "", "planet": "", "satellites": "", "normal": "", "finish": "",
+            "sun": "", "planet": "", "satellites": "", "comets": "", "normal": "", "finish": "",
             "quinella_pay": 0, "trio_pay": 0, "exclude": False}
 
 
@@ -88,7 +89,7 @@ def build_bets(sun: str, planet: str, satellites: list[str], marks: dict[str, st
 
 def process(row: dict) -> tuple[dict | None, list[str]]:
     warnings: list[str] = []
-    fields = ("sun", "planet", "satellites", "normal", "finish", "quinella_pay", "trio_pay")
+    fields = ("sun", "planet", "satellites", "comets", "normal", "finish", "quinella_pay", "trio_pay")
     if row.get("exclude"):
         return None, warnings
     if not any(str(row.get(x, "")).strip() not in ("", "0") for x in fields):
@@ -99,10 +100,13 @@ def process(row: dict) -> tuple[dict | None, list[str]]:
         sun = parse_cars(row.get("sun", ""), max_count=1, exact=1)[0]
         planet = parse_cars(row.get("planet", ""), max_count=1, exact=1)[0]
         sat = parse_cars(row.get("satellites", ""), max_count=7)
+        comets = parse_cars(row.get("comets", ""), max_count=7)
         marks = ordered_marks(row.get("normal", ""))
         if sun == planet or any(s in (sun, planet) for s in sat):
             raise ValueError("太陽・惑星・衛星の車番に重複があります")
-        universe = {sun, planet, *sat, *finish, *marks.values()}
+        if any(c in {sun, planet, *sat} for c in comets):
+            raise ValueError("彗星の車番が太陽・惑星・衛星と重複しています")
+        universe = {sun, planet, *sat, *comets, *finish, *marks.values()}
         if any(v not in "1234567" for v in universe):
             raise ValueError("車番は1〜7の範囲で入力してください")
         if not sat:
@@ -118,7 +122,7 @@ def process(row: dict) -> tuple[dict | None, list[str]]:
     tresult = tuple(sorted(finish))
     bets = build_bets(sun, planet, sat, marks)
     detail = {"R": row.get("race", ""), "開催": row.get("session", "デイ"), "区分": scope_for(row),
-              "太陽": sun, "惑星": planet, "衛星": "".join(sat), "通常評価": row.get("normal", ""),
+              "太陽": sun, "惑星": planet, "衛星": "".join(sat), "彗星": "".join(comets), "通常評価": row.get("normal", ""),
               "着順": "-".join(finish), "2車複配当": qpay, "3連複配当": tpay,
               "bets": {}, "marks": marks}
     for key, candidates in bets.items():
@@ -253,17 +257,18 @@ with tab_daily:
             session=c[1].selectbox("時間帯",SESSIONS,index=SESSIONS.index(r.get("session","デイ")) if r.get("session") in SESSIONS else 1,key=f"pv1_row_{idx}_session")
             girls=c[2].checkbox("ガールズ",value=bool(r.get("girls",False)),key=f"pv1_row_{idx}_girls")
             exclude=c[3].checkbox("集計除外",value=bool(r.get("exclude",False)),key=f"pv1_row_{idx}_exclude")
-            c=st.columns([.8,.8,1.4,1.5,1.0])
+            c=st.columns([.7,.7,1.1,1.1,1.4,1.0])
             sun=c[0].text_input("太陽",value=str(r.get("sun","")),key=f"pv1_row_{idx}_sun")
             planet=c[1].text_input("惑星",value=str(r.get("planet","")),key=f"pv1_row_{idx}_planet")
             satellites=c[2].text_input("衛星（複数可）",value=str(r.get("satellites","")),key=f"pv1_row_{idx}_satellites")
-            normal=c[3].text_input("通常印 ◎○▲△×",value=str(r.get("normal","")),key=f"pv1_row_{idx}_normal")
-            finish=c[4].text_input("着順1〜3着",value=str(r.get("finish","")),key=f"pv1_row_{idx}_finish")
+            comets=c[3].text_input("彗星（任意・複数可）",value=str(r.get("comets","")),key=f"pv1_row_{idx}_comets")
+            normal=c[4].text_input("通常印 ◎○▲△×",value=str(r.get("normal","")),key=f"pv1_row_{idx}_normal")
+            finish=c[5].text_input("着順1〜3着",value=str(r.get("finish","")),key=f"pv1_row_{idx}_finish")
             c=st.columns(2)
             qpay=c[0].number_input("2車複払戻（100円につき）",value=max(0,int(r.get("quinella_pay") or 0)),step=10,min_value=0,key=f"pv1_row_{idx}_qpay")
             tpay=c[1].number_input("3連複払戻（100円につき）",value=max(0,int(r.get("trio_pay") or 0)),step=10,min_value=0,key=f"pv1_row_{idx}_tpay")
             incoming.append({"race":race,"session":session,"girls":girls,"exclude":exclude,
-                             "sun":sun,"planet":planet,"satellites":satellites,"normal":normal,
+                             "sun":sun,"planet":planet,"satellites":satellites,"comets":comets,"normal":normal,
                              "finish":finish,"quinella_pay":int(qpay),"trio_pay":int(tpay)})
             st.divider()
         submitted=st.form_submit_button("この50件を反映",type="primary")
