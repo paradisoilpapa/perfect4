@@ -11,7 +11,6 @@
 """
 from __future__ import annotations
 from collections import Counter
-from datetime import date
 from itertools import combinations
 import json
 import re
@@ -30,7 +29,7 @@ SCOPES = ("男子・通常開催", "男子・ミッドナイト", "ガールズ�
 
 
 def initial_row(i: int) -> dict:
-    return {"date": "", "track": "", "race": str(i), "session": "デイ", "girls": False,
+    return {"race": str(i), "session": "デイ", "girls": False,
             "sun": "", "planet": "", "satellites": "", "normal": "", "finish": "",
             "quinella_pay": 0, "trio_pay": 0, "exclude": False}
 
@@ -94,7 +93,7 @@ def process(row: dict) -> tuple[dict | None, list[str]]:
         return None, warnings
     if not any(str(row.get(x, "")).strip() not in ("", "0") for x in fields):
         return None, warnings
-    rid = f"{row.get('date', '')} {row.get('track', '')} {row.get('race', '')}".strip()
+    rid = str(row.get("race", "")).strip()
     try:
         finish = parse_cars(row.get("finish", ""), max_count=3, exact=3)
         sun = parse_cars(row.get("sun", ""), max_count=1, exact=1)[0]
@@ -118,8 +117,7 @@ def process(row: dict) -> tuple[dict | None, list[str]]:
     qresult = pair(finish[0], finish[1])
     tresult = tuple(sorted(finish))
     bets = build_bets(sun, planet, sat, marks)
-    detail = {"日付": row.get("date", ""), "会場": row.get("track", ""),
-              "R": row.get("race", ""), "開催": row.get("session", "デイ"), "区分": scope_for(row),
+    detail = {"R": row.get("race", ""), "開催": row.get("session", "デイ"), "区分": scope_for(row),
               "太陽": sun, "惑星": planet, "衛星": "".join(sat), "通常評価": row.get("normal", ""),
               "着順": "-".join(finish), "2車複配当": qpay, "3連複配当": tpay,
               "bets": {}, "marks": marks}
@@ -250,13 +248,11 @@ with tab_daily:
         for idx in range(start, start+50):
             r=st.session_state["planet_daily_rows_v1"][idx]
             st.markdown(f"**入力枠 {idx+1}**")
-            c=st.columns([1.25, 1.5, .65, 1.25, .85, .9])
-            day=c[0].text_input("日付 YYYY-MM-DD",value=str(r.get("date","")),key=f"pv1_row_{idx}_date")
-            track=c[1].text_input("会場",value=str(r.get("track","")),key=f"pv1_row_{idx}_track")
-            race=c[2].text_input("R",value=str(r.get("race", "")),key=f"pv1_row_{idx}_race")
-            session=c[3].selectbox("時間帯",SESSIONS,index=SESSIONS.index(r.get("session","デイ")) if r.get("session") in SESSIONS else 1,key=f"pv1_row_{idx}_session")
-            girls=c[4].checkbox("ガールズ",value=bool(r.get("girls",False)),key=f"pv1_row_{idx}_girls")
-            exclude=c[5].checkbox("集計除外",value=bool(r.get("exclude",False)),key=f"pv1_row_{idx}_exclude")
+            c=st.columns([.75, 1.5, .85, .9])
+            race=c[0].text_input("R",value=str(r.get("race", "")),key=f"pv1_row_{idx}_race")
+            session=c[1].selectbox("時間帯",SESSIONS,index=SESSIONS.index(r.get("session","デイ")) if r.get("session") in SESSIONS else 1,key=f"pv1_row_{idx}_session")
+            girls=c[2].checkbox("ガールズ",value=bool(r.get("girls",False)),key=f"pv1_row_{idx}_girls")
+            exclude=c[3].checkbox("集計除外",value=bool(r.get("exclude",False)),key=f"pv1_row_{idx}_exclude")
             c=st.columns([.8,.8,1.4,1.5,1.0])
             sun=c[0].text_input("太陽",value=str(r.get("sun","")),key=f"pv1_row_{idx}_sun")
             planet=c[1].text_input("惑星",value=str(r.get("planet","")),key=f"pv1_row_{idx}_planet")
@@ -266,7 +262,7 @@ with tab_daily:
             c=st.columns(2)
             qpay=c[0].number_input("2車複払戻（100円につき）",value=max(0,int(r.get("quinella_pay") or 0)),step=10,min_value=0,key=f"pv1_row_{idx}_qpay")
             tpay=c[1].number_input("3連複払戻（100円につき）",value=max(0,int(r.get("trio_pay") or 0)),step=10,min_value=0,key=f"pv1_row_{idx}_tpay")
-            incoming.append({"date":day,"track":track,"race":race,"session":session,"girls":girls,"exclude":exclude,
+            incoming.append({"race":race,"session":session,"girls":girls,"exclude":exclude,
                              "sun":sun,"planet":planet,"satellites":satellites,"normal":normal,
                              "finish":finish,"quinella_pay":int(qpay),"trio_pay":int(tpay)})
             st.divider()
